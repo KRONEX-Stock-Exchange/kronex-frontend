@@ -99,6 +99,13 @@ export interface User {
   createdAt: number;
 }
 
+// Account Types
+export interface Account {
+  id: number;
+  accountNumber: number;
+  money: string;
+}
+
 // API Error Type
 export interface ApiError {
   errorCode: string;

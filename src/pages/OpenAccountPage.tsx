@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../services/api/client";
+import { useAccount } from "../contexts/AccountContext";
 
 export function OpenAccountPage() {
   const navigate = useNavigate();
+  const { fetchAccounts } = useAccount();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -16,6 +18,7 @@ export function OpenAccountPage() {
 
       if (response.success) {
         alert("계좌가 개설되었습니다.");
+        await fetchAccounts();
         navigate("/");
       } else {
         const errorMsg =

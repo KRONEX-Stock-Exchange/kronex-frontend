@@ -3,13 +3,74 @@ import { OrderBook } from "../components/orderbook/orderbook";
 import { StockHeader } from "../components/stock/StockHeader";
 import { CandlestickChart } from "../components/chart/CandlestickChart";
 import { useOrderbook } from "../hooks/useOrderbook";
+import { useAccountData } from "../hooks/useAccountData";
+import { useAccount } from "../contexts/AccountContext";
+import { apiClient } from "../services/api/client";
 
 export function TradingPage() {
   const stockId = 1;
   const { data } = useOrderbook(stockId);
+  const { accounts, selectedAccount, setSelectedAccount } = useAccount();
+  const { data: accountData, orderData } = useAccountData(selectedAccount?.id ?? null);
   const [accountTab, setAccountTab] = useState<"내 계좌" | "체결" | "미체결">("내 계좌");
   const [orderType, setOrderType] = useState<"매수" | "매도">("매수");
   const [priceType, setPriceType] = useState<"지정가" | "시장가">("지정가");
+
+  // 주문 폼 상태
+  const [price, setPrice] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleOrder = async () => {
+    const qty = parseInt(quantity);
+    const prc = parseInt(price);
+
+    if (!quantity || qty < 1) {
+      showToast("수량은 1주 이상 입력해주세요.", "error");
+      return;
+    }
+    if (priceType === "지정가" && (!price || prc < 1)) {
+      showToast("가격은 1원 이상 입력해주세요.", "error");
+      return;
+    }
+
+    setOrderLoading(true);
+
+    try {
+      const endpoint = orderType === "매수"
+        ? `/stocks/${stockId}/orders/buy`
+        : `/stocks/${stockId}/orders/sell`;
+
+      const response = await apiClient.post(endpoint, {
+        accountNumber: selectedAccount?.accountNumber,
+        price: priceType === "지정가" ? prc : 0,
+        number: qty,
+        orderType: priceType === "지정가" ? "limit" : "market",
+      });
+
+      if (response.success) {
+        showToast(`${orderType} 주문이 완료되었습니다.`, "success");
+        setPrice("");
+        setQuantity("");
+      } else {
+        const errorMsg =
+          typeof response.error === "object" && response.error !== null
+            ? (response.error as { message?: string }).message || "주문에 실패했습니다."
+            : response.error || "주문에 실패했습니다.";
+        showToast(errorMsg, "error");
+      }
+    } catch {
+      showToast("서버 연결에 실패했습니다.", "error");
+    } finally {
+      setOrderLoading(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -17,15 +78,15 @@ export function TradingPage() {
       <StockHeader stockInfo={data?.stockInfo || null} />
 
       {/* 메인 컨텐츠 */}
-      <div className="flex flex-1 p-5 pb-5 pt-2">
+      <div className="flex flex-1 min-h-0 p-5 pb-5 pt-2">
         {/* 차트 영역 (6:4 분할) */}
-        <div className="w-[50%] flex flex-col p-2 gap-2">
+        <div className="w-[50%] min-h-0 flex flex-col p-2 gap-2">
           {/* 차트 (60%) */}
           <div className="h-[60%]">
             <CandlestickChart />
           </div>
           {/* 내 계좌 (40%) */}
-          <div className="h-[40%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
+          <div className="h-[40%] min-h-0 bg-[#181a20] rounded-2xl p-4 flex flex-col">
             {/* 탭 */}
             <div className="flex items-center gap-4 mb-3">
               <button
@@ -54,47 +115,75 @@ export function TradingPage() {
               </button>
             </div>
             {/* 테이블 내용 */}
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 min-h-0 overflow-auto">
               {accountTab === "내 계좌" && (
                 <>
                   <div className="mb-3">
-                    <select className="bg-[#2b2f36] text-white text-xs px-3 py-1 rounded-lg border border-[#3b3f46] outline-none">
-                      <option value="1">123-456-789012</option>
-                      <option value="2">987-654-321098</option>
+                    <select
+                      value={selectedAccount?.id ?? ""}
+                      onChange={(e) => {
+                        const account = accounts.find((a) => a.id === Number(e.target.value));
+                        if (account) setSelectedAccount(account);
+                      }}
+                      className="bg-[#2b2f36] text-white text-xs px-3 py-1 rounded-lg border border-[#3b3f46] outline-none"
+                    >
+                      {accounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.accountNumber}
+                        </option>
+                      ))}
                     </select>
+                    {accountData && (
+                      <span className="ml-3 text-[#0ecb81] text-xs font-semibold">
+                        {Number(accountData.account.money).toLocaleString("ko-KR")} KRW
+                      </span>
+                    )}
                   </div>
                   <table className="w-full text-xs">
                     <thead className="text-zinc-500 border-b border-[#2b2f36]">
                       <tr>
                         <th className="text-left py-2">종목명</th>
-                        <th className="text-right py-2">보유수량</th>
-                        <th className="text-right py-2">가능수량</th>
-                        <th className="text-right py-2">평균가격</th>
-                        <th className="text-right py-2">총 매수금액</th>
+                        <th className="text-right py-2">보유</th>
+                        <th className="text-right py-2">가능</th>
+                        <th className="text-right py-2">평균가</th>
+                        <th className="text-right py-2">현재가</th>
+                        <th className="text-right py-2">매수금액</th>
+                        <th className="text-right py-2">수익률</th>
+                        <th className="text-right py-2">수익금액</th>
                       </tr>
                     </thead>
                     <tbody className="text-white">
-                      <tr className="border-b border-[#2b2f36]">
-                        <td className="py-2">삼성전자</td>
-                        <td className="text-right py-2">100</td>
-                        <td className="text-right py-2">100</td>
-                        <td className="text-right py-2">72,500</td>
-                        <td className="text-right py-2">7,250,000</td>
-                      </tr>
-                      <tr className="border-b border-[#2b2f36]">
-                        <td className="py-2">SK하이닉스</td>
-                        <td className="text-right py-2">50</td>
-                        <td className="text-right py-2">30</td>
-                        <td className="text-right py-2">135,000</td>
-                        <td className="text-right py-2">6,750,000</td>
-                      </tr>
-                      <tr className="border-b border-[#2b2f36]">
-                        <td className="py-2">NAVER</td>
-                        <td className="text-right py-2">20</td>
-                        <td className="text-right py-2">20</td>
-                        <td className="text-right py-2">215,500</td>
-                        <td className="text-right py-2">4,310,000</td>
-                      </tr>
+                      {accountData?.userStock.map((stock) => {
+                        const currentPrice = Number(stock.stocks.price);
+                        const avg = Number(stock.average);
+                        const qty = Number(stock.number);
+                        const profitRate = avg > 0 ? ((currentPrice - avg) / avg) * 100 : 0;
+                        const profitAmount = (currentPrice - avg) * qty;
+                        const profitColor = profitRate > 0 ? "text-[#f6465d]" : profitRate < 0 ? "text-[#2563eb]" : "text-white";
+                        return (
+                          <tr key={stock.stocks.id} className="border-b border-[#2b2f36]">
+                            <td className="py-2">{stock.stocks.name}</td>
+                            <td className="text-right py-2">{qty.toLocaleString("ko-KR")}</td>
+                            <td className="text-right py-2">{Number(stock.canNumber).toLocaleString("ko-KR")}</td>
+                            <td className="text-right py-2">{avg.toLocaleString("ko-KR")}</td>
+                            <td className="text-right py-2">{currentPrice.toLocaleString("ko-KR")}</td>
+                            <td className="text-right py-2">{Number(stock.totalBuyAmount).toLocaleString("ko-KR")}</td>
+                            <td className={`text-right py-2 ${profitColor}`}>
+                              {profitRate > 0 ? "+" : ""}{profitRate.toFixed(2)}%
+                            </td>
+                            <td className={`text-right py-2 ${profitColor}`}>
+                              {profitAmount > 0 ? "+" : ""}{profitAmount.toLocaleString("ko-KR")}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {(!accountData || accountData.userStock.length === 0) && (
+                        <tr>
+                          <td colSpan={8} className="py-4 text-center text-zinc-500">
+                            보유 종목이 없습니다
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </>
@@ -103,28 +192,40 @@ export function TradingPage() {
                 <table className="w-full text-xs">
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
+                      <th className="text-left py-2">주문ID</th>
+                      <th className="text-left py-2">종목ID</th>
                       <th className="text-left py-2">종목명</th>
-                      <th className="text-right py-2">체결유형</th>
+                      <th className="text-right py-2">유형</th>
+                      <th className="text-right py-2">주문구분</th>
+                      <th className="text-right py-2">주문수량</th>
                       <th className="text-right py-2">체결수량</th>
-                      <th className="text-right py-2">체결가격</th>
-                      <th className="text-right py-2">체결시간</th>
+                      <th className="text-right py-2">주문가격</th>
                     </tr>
                   </thead>
                   <tbody className="text-white">
-                    <tr className="border-b border-[#2b2f36]">
-                      <td className="py-2">삼성전자</td>
-                      <td className="text-right py-2 text-[#f6465d]">매수</td>
-                      <td className="text-right py-2">100</td>
-                      <td className="text-right py-2">72,500</td>
-                      <td className="text-right py-2">09:31:25</td>
-                    </tr>
-                    <tr className="border-b border-[#2b2f36]">
-                      <td className="py-2">NAVER</td>
-                      <td className="text-right py-2 text-[#2563eb]">매도</td>
-                      <td className="text-right py-2">10</td>
-                      <td className="text-right py-2">218,000</td>
-                      <td className="text-right py-2">10:15:42</td>
-                    </tr>
+                    {orderData?.executionOrder.map((order) => (
+                      <tr key={order.id} className="border-b border-[#2b2f36]">
+                        <td className="py-2">{order.id}</td>
+                        <td className="py-2">{order.stockId}</td>
+                        <td className="py-2">{order.stockName}</td>
+                        <td className={`text-right py-2 ${order.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}>
+                          {order.tradingType === "buy" ? "매수" : "매도"}
+                        </td>
+                        <td className="text-right py-2">
+                          {Number(order.price) === 0 ? "시장가" : "지정가"}
+                        </td>
+                        <td className="text-right py-2">{Number(order.number).toLocaleString("ko-KR")}</td>
+                        <td className="text-right py-2">{Number(order.matchNumber).toLocaleString("ko-KR")}</td>
+                        <td className="text-right py-2">{Number(order.price) === 0 ? "-" : Number(order.price).toLocaleString("ko-KR")}</td>
+                      </tr>
+                    ))}
+                    {(!orderData || orderData.executionOrder.length === 0) && (
+                      <tr>
+                        <td colSpan={8} className="py-4 text-center text-zinc-500">
+                          체결 내역이 없습니다
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               )}
@@ -132,28 +233,40 @@ export function TradingPage() {
                 <table className="w-full text-xs">
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
+                      <th className="text-left py-2">주문ID</th>
+                      <th className="text-left py-2">종목ID</th>
                       <th className="text-left py-2">종목명</th>
-                      <th className="text-right py-2">주문유형</th>
+                      <th className="text-right py-2">유형</th>
+                      <th className="text-right py-2">주문구분</th>
                       <th className="text-right py-2">주문수량</th>
                       <th className="text-right py-2">주문가격</th>
-                      <th className="text-right py-2">미체결수량</th>
+                      <th className="text-right py-2">미체결</th>
                     </tr>
                   </thead>
                   <tbody className="text-white">
-                    <tr className="border-b border-[#2b2f36]">
-                      <td className="py-2">삼성전자</td>
-                      <td className="text-right py-2 text-[#f6465d]">매수</td>
-                      <td className="text-right py-2">50</td>
-                      <td className="text-right py-2">71,000</td>
-                      <td className="text-right py-2">50</td>
-                    </tr>
-                    <tr className="border-b border-[#2b2f36]">
-                      <td className="py-2">카카오</td>
-                      <td className="text-right py-2 text-[#2563eb]">매도</td>
-                      <td className="text-right py-2">30</td>
-                      <td className="text-right py-2">55,000</td>
-                      <td className="text-right py-2">30</td>
-                    </tr>
+                    {orderData?.noExecutionOrder.map((order) => (
+                      <tr key={order.id} className="border-b border-[#2b2f36]">
+                        <td className="py-2">{order.id}</td>
+                        <td className="py-2">{order.stockId}</td>
+                        <td className="py-2">{order.stockName}</td>
+                        <td className={`text-right py-2 ${order.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}>
+                          {order.tradingType === "buy" ? "매수" : "매도"}
+                        </td>
+                        <td className="text-right py-2">
+                          {Number(order.price) === 0 ? "시장가" : "지정가"}
+                        </td>
+                        <td className="text-right py-2">{Number(order.number).toLocaleString("ko-KR")}</td>
+                        <td className="text-right py-2">{Number(order.price) === 0 ? "-" : Number(order.price).toLocaleString("ko-KR")}</td>
+                        <td className="text-right py-2">{(Number(order.number) - Number(order.matchNumber)).toLocaleString("ko-KR")}</td>
+                      </tr>
+                    ))}
+                    {(!orderData || orderData.noExecutionOrder.length === 0) && (
+                      <tr>
+                        <td colSpan={8} className="py-4 text-center text-zinc-500">
+                          미체결 내역이 없습니다
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               )}
@@ -191,9 +304,19 @@ export function TradingPage() {
               {/* 주문계좌 */}
               <div>
                 <label className="text-xs text-zinc-500 mb-1 block">주문계좌</label>
-                <select className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none">
-                  <option value="1">123-456-789012</option>
-                  <option value="2">987-654-321098</option>
+                <select
+                  value={selectedAccount?.id ?? ""}
+                  onChange={(e) => {
+                    const account = accounts.find((a) => a.id === Number(e.target.value));
+                    if (account) setSelectedAccount(account);
+                  }}
+                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
+                >
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.accountNumber}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -231,6 +354,8 @@ export function TradingPage() {
                   <input
                     type="number"
                     placeholder="0"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
                     className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
                   />
                 </div>
@@ -242,19 +367,23 @@ export function TradingPage() {
                 <input
                   type="number"
                   placeholder="0"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
                   className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
                 />
               </div>
 
               {/* 주문 버튼 */}
               <button
-                className={`mt-auto py-3 rounded-lg text-sm font-bold ${
+                onClick={handleOrder}
+                disabled={orderLoading}
+                className={`mt-auto py-3 rounded-lg text-sm font-bold disabled:opacity-50 ${
                   orderType === "매수"
                     ? "bg-[#f6465d] text-white"
                     : "bg-[#2563eb] text-white"
                 }`}
               >
-                {orderType}
+                {orderLoading ? "처리중..." : orderType}
               </button>
             </div>
           </div>
@@ -314,6 +443,19 @@ export function TradingPage() {
           </div>
         </div>
       </div>
+
+      {/* 토스트 알림 */}
+      {toast && (
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium shadow-lg z-50 transition-all ${
+            toast.type === "success"
+              ? "bg-[#0ecb81] text-black"
+              : "bg-[#f6465d] text-white"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }

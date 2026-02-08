@@ -31,6 +31,7 @@ export function useOrderbook(stockId: number) {
   useEffect(() => {
     const newSocket = io("ws://localhost:3003/stock", {
       transports: ["websocket"],
+      withCredentials: true,
     });
 
     newSocket.on("connect", () => {

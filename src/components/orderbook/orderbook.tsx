@@ -1,5 +1,6 @@
+import { useRef } from "react";
 import { useOrderbook } from "../../hooks/useOrderbook";
-import type { StockInfo } from "../../hooks/useOrderbook";
+import type { StockInfo, OrderbookItem } from "../../hooks/useOrderbook";
 import { Tick, EmptyTick } from "./tick";
 
 const MAX_TICKS = 10; // 호가창 최대 행 수
@@ -17,14 +18,14 @@ interface MatchItem {
 
 function MatchHistory({
   matches,
-  basePrice,
+  previousClose,
 }: {
   matches: MatchItem[];
-  basePrice: number;
+  previousClose: number;
 }) {
   const getPriceColor = (price: number) => {
-    if (price > basePrice) return "text-[#f6465d]";
-    if (price < basePrice) return "text-[#2563eb]";
+    if (price > previousClose) return "text-[#f6465d]";
+    if (price < previousClose) return "text-[#2563eb]";
     return "text-white";
   };
 
@@ -61,38 +62,67 @@ function MatchHistory({
 function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
   if (!stockInfo) return null;
 
+  const prev = parseFloat(stockInfo.previousClose);
+  const getPercent = (val: string) => {
+    const v = parseFloat(val);
+    return prev > 0 ? ((v - prev) / prev) * 100 : 0;
+  };
+  const getColor = (pct: number) => {
+    if (pct > 0) return "text-[#f6465d]";
+    if (pct < 0) return "text-[#2563eb]";
+    return "text-white";
+  };
+
   const items = [
-    { label: "전일종가", value: stockInfo.previousClose },
-    { label: "시가", value: stockInfo.open },
-    { label: "고가", value: stockInfo.high },
-    { label: "저가", value: stockInfo.low },
-    { label: "종가", value: stockInfo.close },
+    { label: "전일종가", value: stockInfo.previousClose, showPercent: false },
+    { label: "시가", value: stockInfo.open, showPercent: true },
+    { label: "고가", value: stockInfo.high, showPercent: true },
+    { label: "저가", value: stockInfo.low, showPercent: true },
   ];
 
   return (
     <div className="w-full h-full flex flex-col justify-end p-2 px-4">
-      {items.map((item, i) => (
-        <div
-          key={i}
-          className="flex justify-between text-xs py-1 border-b border-[#2b2f36]"
-        >
-          <span className="text-zinc-500">{item.label}</span>
-          <span className="text-white">
-            {parseFloat(item.value).toLocaleString()}
-          </span>
-        </div>
-      ))}
+      {items.map((item, i) => {
+        const pct = getPercent(item.value);
+        const color = getColor(pct);
+        return (
+          <div
+            key={i}
+            className="flex justify-between text-xs py-1 border-b border-[#2b2f36]"
+          >
+            <span className="text-zinc-500">{item.label}</span>
+            <span className="flex gap-2">
+              {item.showPercent && (
+                <span className={color}>
+                  {pct > 0 ? "+" : ""}
+                  {pct.toFixed(2)}%
+                </span>
+              )}
+              <span className={item.showPercent ? color : "text-white"}>
+                {parseFloat(item.value).toLocaleString()}
+              </span>
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 export function OrderBook({ stockId = 1 }: OrderBookProps) {
   const { data } = useOrderbook(stockId);
+  const prevSellRef = useRef<OrderbookItem[]>([]);
+  const prevBuyRef = useRef<OrderbookItem[]>([]);
 
   // 현재가 (stockInfo.price 기준)
   const basePrice = data?.stockInfo?.price
     ? parseFloat(data.stockInfo.price)
     : 9500;
+
+  // 전일종가
+  const previousClose = data?.stockInfo?.previousClose
+    ? parseFloat(data.stockInfo.previousClose)
+    : basePrice;
 
   // 매도/매수 데이터
   const sellOrders = data?.sellOrderbookData || [];
@@ -115,6 +145,10 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
     .sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
     .slice(0, MAX_TICKS);
 
+  // 현재 데이터를 이전 데이터로 저장
+  prevSellRef.current = sellOrders.map((o) => ({ ...o }));
+  prevBuyRef.current = buyOrders.map((o) => ({ ...o }));
+
   // 빈 틱 채우기
   const emptySellCount = MAX_TICKS - sortedSellOrders.length;
   const emptyBuyCount = MAX_TICKS - sortedBuyOrders.length;
@@ -128,7 +162,14 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
 
       {/* 체결 현황 패널 (매수 영역 왼쪽) */}
       <div className="absolute left-0 bottom-0 w-[38%] h-[50%]">
-        <MatchHistory matches={data?.match || []} basePrice={basePrice} />
+        <MatchHistory
+          matches={data?.match || []}
+          previousClose={
+            data?.stockInfo?.previousClose
+              ? parseFloat(data.stockInfo.previousClose)
+              : basePrice
+          }
+        />
       </div>
 
       {/* sell */}
@@ -145,6 +186,7 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
             price={order.price}
             number={order.number}
             basePrice={basePrice}
+            previousClose={previousClose}
             maxNumber={maxNumber}
           />
         ))}
@@ -159,6 +201,7 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
             price={order.price}
             number={order.number}
             basePrice={basePrice}
+            previousClose={previousClose}
             maxNumber={maxNumber}
           />
         ))}

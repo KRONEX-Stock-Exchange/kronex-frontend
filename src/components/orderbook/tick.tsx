@@ -3,15 +3,23 @@ type TickProps = {
   price: string;
   number: string;
   basePrice: number;
+  previousClose: number;
   maxNumber: number;
 };
 
-export function Tick({ type, price, number, basePrice, maxNumber }: TickProps) {
+export function Tick({
+  type,
+  price,
+  number,
+  previousClose,
+  maxNumber,
+}: TickProps) {
   const priceNum = parseFloat(price);
   const numberNum = parseFloat(number);
 
-  // 등락률 계산 (현재가 대비)
-  const changePercent = ((priceNum - basePrice) / basePrice) * 100;
+  // 등락률 계산 (전일종가 대비)
+  const changePercent =
+    previousClose > 0 ? ((priceNum - previousClose) / previousClose) * 100 : 0;
   const changeText =
     changePercent >= 0
       ? `+${changePercent.toFixed(2)}%`
@@ -36,15 +44,15 @@ export function Tick({ type, price, number, basePrice, maxNumber }: TickProps) {
               className="absolute right-0 h-[90%] bg-[#2563eb]/15"
               style={{ width: `${barWidth}%` }}
             ></div>
-            <div className="relative z-10 m-2 text-xs text-white">
+            <div className="relative z-10 m-2 text-sm text-white">
               {numberNum.toLocaleString()}
             </div>
           </div>
           <div className="w-[15%] h-full border-r flex justify-center items-center border-[rgb(43,47,54)] bg-[#1e2329]">
-            <div className={`text-xs ${getTextColor()}`}>{changeText}</div>
+            <div className={`text-sm ${getTextColor()}`}>{changeText}</div>
           </div>
           <div className="w-[24%] h-full flex justify-center items-center bg-[#1e2329]">
-            <div className={`text-xs font-medium ${getTextColor()}`}>
+            <div className={`text-sm font-medium ${getTextColor()}`}>
               {priceNum.toLocaleString()}
             </div>
           </div>
@@ -59,19 +67,19 @@ export function Tick({ type, price, number, basePrice, maxNumber }: TickProps) {
       <div className="flex h-full">
         <div className="w-[38%] h-full bg-[#181a20]"></div>
         <div className="w-[24%] h-full flex justify-center items-center bg-[#1e2329]">
-          <div className={`text-xs font-medium ${getTextColor()}`}>
+          <div className={`text-sm font-medium ${getTextColor()}`}>
             {priceNum.toLocaleString()}
           </div>
         </div>
         <div className="w-[15%] h-full border-l flex justify-center items-center border-[rgb(43,47,54)] bg-[#1e2329]">
-          <div className={`text-xs ${getTextColor()}`}>{changeText}</div>
+          <div className={`text-sm ${getTextColor()}`}>{changeText}</div>
         </div>
         <div className="w-[23%] h-full flex justify-start items-center bg-[#181a20] relative">
           <div
             className="absolute left-0 h-[90%] bg-[#f6465d]/15"
             style={{ width: `${barWidth}%` }}
           ></div>
-          <div className="relative z-10 m-2 text-xs text-white">
+          <div className="relative z-10 m-2 text-sm text-white">
             {numberNum.toLocaleString()}
           </div>
         </div>

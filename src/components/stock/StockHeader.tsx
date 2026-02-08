@@ -21,7 +21,7 @@ export function StockHeader({ stockInfo }: StockHeaderProps) {
         : "text-white";
 
   return (
-    <div className="flex items-center gap-4 px-4 py-2 mx-5 mt-2 bg-[#1e2329] rounded-xl">
+    <div className="flex items-center gap-4 px-4 py-2 mx-7 mt-2 bg-[#181a20] rounded-xl">
       {/* 주식 이미지 + 이름 */}
       <div className="flex items-center gap-2">
         <img
