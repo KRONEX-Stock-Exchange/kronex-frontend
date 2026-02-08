@@ -1,4 +1,4 @@
-import { API_BASE_URL, STORAGE_KEYS } from '../../constants';
+import { API_BASE_URL } from '../../constants';
 import type { ApiResponse } from '../../types';
 
 class ApiClient {
@@ -9,22 +9,16 @@ class ApiClient {
   }
 
   private getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
+    return {
       'Content-Type': 'application/json',
     };
-
-    const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    return headers;
   }
 
   async get<T>(endpoint: string): Promise<ApiResponse<T>> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'GET',
       headers: this.getHeaders(),
+      credentials: 'include',
     });
     return response.json();
   }
@@ -33,6 +27,7 @@ class ApiClient {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'POST',
       headers: this.getHeaders(),
+      credentials: 'include',
       body: body ? JSON.stringify(body) : undefined,
     });
     return response.json();
@@ -42,6 +37,7 @@ class ApiClient {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'PUT',
       headers: this.getHeaders(),
+      credentials: 'include',
       body: body ? JSON.stringify(body) : undefined,
     });
     return response.json();
@@ -51,6 +47,7 @@ class ApiClient {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
+      credentials: 'include',
     });
     return response.json();
   }

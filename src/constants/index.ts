@@ -1,6 +1,6 @@
 // API Configuration
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
-export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8080/ws';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:3003';
 
 // Time Intervals
 export const TIME_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d', '1w'] as const;

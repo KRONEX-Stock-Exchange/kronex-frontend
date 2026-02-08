@@ -1,1 +1,47 @@
 @import "tailwindcss";
+
+@font-face {
+  font-family: "NanumBarunGothic";
+  src: url("//cdn.jsdelivr.net/font-nanumlight/1.0/NanumBarunGothicWeb.eot");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NanumBarunGothic";
+  src: url("//cdn.jsdelivr.net/font-nanumlight/1.0/NanumBarunGothicWebBold.eot");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NanumBarunGothic";
+  src: url("//cdn.jsdelivr.net/font-nanumlight/1.0/NanumBarunGothicWebLight.eot");
+  font-weight: 300;
+  font-display: swap;
+}
+
+body {
+  background-color: #18181b;
+  color: #fff;
+  margin: 0;
+  font-family:
+    "NanumBarunGothic",
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+}
+
+/* 숫자용 모노스페이스 폰트 */
+.font-mono {
+  font-family: "JetBrains Mono", monospace;
+}
+
+/* 한글 폰트 */
+.font-nanum {
+  font-family: "NanumBarunGothic", sans-serif;
+}
+
+/* 숫자 정렬용 (같은 너비) */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
