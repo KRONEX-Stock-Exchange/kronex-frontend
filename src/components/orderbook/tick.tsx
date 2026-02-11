@@ -5,14 +5,21 @@ type TickProps = {
   basePrice: number;
   previousClose: number;
   maxNumber: number;
+  diff: number | null;
+  highPrice?: number;
+  lowPrice?: number;
 };
 
 export function Tick({
   type,
   price,
   number,
+  basePrice,
   previousClose,
   maxNumber,
+  diff,
+  highPrice,
+  lowPrice,
 }: TickProps) {
   const priceNum = parseFloat(price);
   const numberNum = parseFloat(number);
@@ -35,6 +42,26 @@ export function Tick({
     return "text-[#2563eb]";
   };
 
+  // 현재가/고점/저점 테두리
+  const getPriceBoxRing = () => {
+    if (priceNum === basePrice) return "ring-1 ring-inset ring-white";
+    if (highPrice !== undefined && priceNum === highPrice)
+      return "ring-1 ring-inset ring-[#f6465d]";
+    if (lowPrice !== undefined && priceNum === lowPrice)
+      return "ring-1 ring-inset ring-[#2563eb]";
+    return "";
+  };
+
+  // diff 표시
+  const diffText =
+    diff != null && diff !== 0
+      ? diff > 0
+        ? `+${diff.toLocaleString()}`
+        : diff.toLocaleString()
+      : null;
+  const diffColor =
+    diff != null && diff > 0 ? "text-[#f6465d]" : "text-[#2563eb]";
+
   if (type === "sell") {
     return (
       <div className="w-full h-[10%]">
@@ -44,6 +71,11 @@ export function Tick({
               className="absolute right-0 h-[90%] bg-[#2563eb]/15"
               style={{ width: `${barWidth}%` }}
             ></div>
+            {diffText && (
+              <span className={`absolute left-1 z-10 text-xs font-medium ${diffColor}`}>
+                {diffText}
+              </span>
+            )}
             <div className="relative z-10 m-2 text-sm text-white">
               {numberNum.toLocaleString()}
             </div>
@@ -51,7 +83,7 @@ export function Tick({
           <div className="w-[15%] h-full border-r flex justify-center items-center border-[rgb(43,47,54)] bg-[#1e2329]">
             <div className={`text-sm ${getTextColor()}`}>{changeText}</div>
           </div>
-          <div className="w-[24%] h-full flex justify-center items-center bg-[#1e2329]">
+          <div className={`w-[24%] h-full flex justify-center items-center bg-[#1e2329] ${getPriceBoxRing()}`}>
             <div className={`text-sm font-medium ${getTextColor()}`}>
               {priceNum.toLocaleString()}
             </div>
@@ -66,7 +98,7 @@ export function Tick({
     <div className="w-full h-[10%]">
       <div className="flex h-full">
         <div className="w-[38%] h-full bg-[#181a20]"></div>
-        <div className="w-[24%] h-full flex justify-center items-center bg-[#1e2329]">
+        <div className={`w-[24%] h-full flex justify-center items-center bg-[#1e2329] ${getPriceBoxRing()}`}>
           <div className={`text-sm font-medium ${getTextColor()}`}>
             {priceNum.toLocaleString()}
           </div>
@@ -82,6 +114,11 @@ export function Tick({
           <div className="relative z-10 m-2 text-sm text-white">
             {numberNum.toLocaleString()}
           </div>
+          {diffText && (
+            <span className={`absolute right-1 z-10 text-xs font-medium ${diffColor}`}>
+              {diffText}
+            </span>
+          )}
         </div>
       </div>
     </div>

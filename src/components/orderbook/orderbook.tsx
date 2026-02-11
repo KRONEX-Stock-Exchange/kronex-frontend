@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useOrderbook } from "../../hooks/useOrderbook";
 import type { StockInfo, OrderbookItem } from "../../hooks/useOrderbook";
 import { Tick, EmptyTick } from "./tick";
@@ -39,7 +39,7 @@ function MatchHistory({
         체결
       </div>
       <div className="flex-1 overflow-y-auto">
-        {matches.slice(0, 10).map((match, i) => {
+        {matches.slice(0, 50).map((match, i) => {
           const priceNum = parseFloat(match.price);
           const numberNum = parseFloat(match.number);
           return (
@@ -75,7 +75,7 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
 
   const items = [
     { label: "전일종가", value: stockInfo.previousClose, showPercent: false },
-    { label: "시가", value: stockInfo.open, showPercent: true },
+    { label: "시가", value: stockInfo.open, showPercent: false },
     { label: "고가", value: stockInfo.high, showPercent: true },
     { label: "저가", value: stockInfo.low, showPercent: true },
   ];
@@ -113,6 +113,101 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
   const { data } = useOrderbook(stockId);
   const prevSellRef = useRef<OrderbookItem[]>([]);
   const prevBuyRef = useRef<OrderbookItem[]>([]);
+  const [sellDiffs, setSellDiffs] = useState<Map<string, number>>(new Map());
+  const [buyDiffs, setBuyDiffs] = useState<Map<string, number>>(new Map());
+  const diffTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
+  // 호가 데이터 변경 시 diff 계산 + 가격별 10초 후 제거
+  useEffect(() => {
+    const sellOrders = data?.sellOrderbookData || [];
+    const buyOrders = data?.buyOrderbookData || [];
+
+    if (prevSellRef.current.length > 0 || prevBuyRef.current.length > 0) {
+      const prevSellMap = new Map(
+        prevSellRef.current.map((o) => [o.price, parseFloat(o.number)]),
+      );
+      const prevBuyMap = new Map(
+        prevBuyRef.current.map((o) => [o.price, parseFloat(o.number)]),
+      );
+
+      // 매도 diff 병합
+      for (const order of sellOrders) {
+        const prev = prevSellMap.get(order.price);
+        if (prev !== undefined) {
+          const diff = parseFloat(order.number) - prev;
+          if (diff !== 0) {
+            const key = `sell_${order.price}`;
+            // 기존 타이머 제거
+            if (diffTimersRef.current.has(key)) {
+              clearTimeout(diffTimersRef.current.get(key)!);
+            }
+            // 기존 diff에 누적
+            setSellDiffs((prev) => {
+              const next = new Map(prev);
+              next.set(order.price, (next.get(order.price) ?? 0) + diff);
+              return next;
+            });
+            // 10초 후 해당 가격만 제거
+            diffTimersRef.current.set(
+              key,
+              setTimeout(() => {
+                setSellDiffs((prev) => {
+                  const next = new Map(prev);
+                  next.delete(order.price);
+                  return next;
+                });
+                diffTimersRef.current.delete(key);
+              }, 10000),
+            );
+          }
+        }
+      }
+
+      // 매수 diff 병합
+      for (const order of buyOrders) {
+        const prev = prevBuyMap.get(order.price);
+        if (prev !== undefined) {
+          const diff = parseFloat(order.number) - prev;
+          if (diff !== 0) {
+            const key = `buy_${order.price}`;
+            if (diffTimersRef.current.has(key)) {
+              clearTimeout(diffTimersRef.current.get(key)!);
+            }
+            setBuyDiffs((prev) => {
+              const next = new Map(prev);
+              next.set(order.price, (next.get(order.price) ?? 0) + diff);
+              return next;
+            });
+            diffTimersRef.current.set(
+              key,
+              setTimeout(() => {
+                setBuyDiffs((prev) => {
+                  const next = new Map(prev);
+                  next.delete(order.price);
+                  return next;
+                });
+                diffTimersRef.current.delete(key);
+              }, 10000),
+            );
+          }
+        }
+      }
+    }
+
+    prevSellRef.current = sellOrders.map((o) => ({ ...o }));
+    prevBuyRef.current = buyOrders.map((o) => ({ ...o }));
+  }, [data]);
+
+  // 언마운트 시 모든 타이머 정리
+  useEffect(() => {
+    return () => {
+      for (const timer of diffTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+    };
+  }, []);
 
   // 현재가 (stockInfo.price 기준)
   const basePrice = data?.stockInfo?.price
@@ -123,6 +218,14 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
   const previousClose = data?.stockInfo?.previousClose
     ? parseFloat(data.stockInfo.previousClose)
     : basePrice;
+
+  // 고가/저가
+  const highPrice = data?.stockInfo?.high
+    ? parseFloat(data.stockInfo.high)
+    : undefined;
+  const lowPrice = data?.stockInfo?.low
+    ? parseFloat(data.stockInfo.low)
+    : undefined;
 
   // 매도/매수 데이터
   const sellOrders = data?.sellOrderbookData || [];
@@ -145,9 +248,9 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
     .sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
     .slice(0, MAX_TICKS);
 
-  // 현재 데이터를 이전 데이터로 저장
-  prevSellRef.current = sellOrders.map((o) => ({ ...o }));
-  prevBuyRef.current = buyOrders.map((o) => ({ ...o }));
+  // 총 잔량
+  const sellTotal = sellOrders.reduce((sum, o) => sum + parseFloat(o.number), 0);
+  const buyTotal = buyOrders.reduce((sum, o) => sum + parseFloat(o.number), 0);
 
   // 빈 틱 채우기
   const emptySellCount = MAX_TICKS - sortedSellOrders.length;
@@ -156,12 +259,12 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
   return (
     <div className="h-full bg-[#181a20] rounded-2xl overflow-hidden relative">
       {/* 주식 정보 패널 (매도 영역 오른쪽) */}
-      <div className="absolute right-0 top-0 w-[38%] h-[50%]">
+      <div className="absolute right-0 top-0 w-[38%] h-[48%]">
         <StockInfoPanel stockInfo={data?.stockInfo || null} />
       </div>
 
       {/* 체결 현황 패널 (매수 영역 왼쪽) */}
-      <div className="absolute left-0 bottom-0 w-[38%] h-[50%]">
+      <div className="absolute left-0 bottom-[4%] w-[38%] h-[48%]">
         <MatchHistory
           matches={data?.match || []}
           previousClose={
@@ -173,7 +276,7 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
       </div>
 
       {/* sell */}
-      <div className="h-[50%]">
+      <div className="h-[48%]">
         {/* 빈 틱 (위쪽) */}
         {Array.from({ length: emptySellCount }).map((_, i) => (
           <EmptyTick key={`empty-sell-${i}`} type="sell" />
@@ -188,11 +291,14 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
             basePrice={basePrice}
             previousClose={previousClose}
             maxNumber={maxNumber}
+            diff={sellDiffs.get(order.price) ?? null}
+            highPrice={highPrice}
+            lowPrice={lowPrice}
           />
         ))}
       </div>
       {/* buy */}
-      <div className="h-[50%]">
+      <div className="h-[48%]">
         {/* 매수 호가 */}
         {sortedBuyOrders.map((order, i) => (
           <Tick
@@ -203,12 +309,33 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
             basePrice={basePrice}
             previousClose={previousClose}
             maxNumber={maxNumber}
+            diff={buyDiffs.get(order.price) ?? null}
+            highPrice={highPrice}
+            lowPrice={lowPrice}
           />
         ))}
         {/* 빈 틱 (아래쪽) */}
         {Array.from({ length: emptyBuyCount }).map((_, i) => (
           <EmptyTick key={`empty-buy-${i}`} type="buy" />
         ))}
+      </div>
+      {/* 총 잔량 */}
+      <div className="h-[4%] flex items-center border-t border-[#2b2f36]">
+        <div className="w-[23%] flex justify-end items-center pr-2">
+          <span className="text-xs text-[#2563eb]">
+            {sellTotal.toLocaleString()}
+          </span>
+        </div>
+        <div className="w-[15%]" />
+        <div className="w-[24%] flex justify-center items-center">
+          <span className="text-[10px] text-zinc-500">총 잔량</span>
+        </div>
+        <div className="w-[15%]" />
+        <div className="w-[23%] flex justify-start items-center pl-2">
+          <span className="text-xs text-[#f6465d]">
+            {buyTotal.toLocaleString()}
+          </span>
+        </div>
       </div>
     </div>
   );

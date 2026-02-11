@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { OrderBook } from "../components/orderbook/orderbook";
 import { StockHeader } from "../components/stock/StockHeader";
 import { CandlestickChart } from "../components/chart/CandlestickChart";
@@ -6,6 +6,13 @@ import { useOrderbook } from "../hooks/useOrderbook";
 import { useAccountData } from "../hooks/useAccountData";
 import { useAccount } from "../contexts/AccountContext";
 import { apiClient } from "../services/api/client";
+
+interface StockItem {
+  id: number;
+  name: string;
+  price: string;
+  per: string;
+}
 
 export function TradingPage() {
   const stockId = 1;
@@ -21,6 +28,19 @@ export function TradingPage() {
   const [quantity, setQuantity] = useState("");
   const [orderLoading, setOrderLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [stocks, setStocks] = useState<StockItem[]>([]);
+
+  useEffect(() => {
+    const fetchStocks = async () => {
+      const response = await apiClient.get<StockItem[]>("/stocks");
+      if (response.success && response.data) {
+        setStocks(response.data);
+      }
+    };
+    fetchStocks();
+    const interval = setInterval(fetchStocks, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -56,8 +76,6 @@ export function TradingPage() {
 
       if (response.success) {
         showToast(`${orderType} 주문이 완료되었습니다.`, "success");
-        setPrice("");
-        setQuantity("");
       } else {
         const errorMsg =
           typeof response.error === "object" && response.error !== null
@@ -83,7 +101,7 @@ export function TradingPage() {
         <div className="w-[50%] min-h-0 flex flex-col p-2 gap-2">
           {/* 차트 (60%) */}
           <div className="h-[60%]">
-            <CandlestickChart />
+            <CandlestickChart stockId={stockId} />
           </div>
           {/* 내 계좌 (40%) */}
           <div className="h-[40%] min-h-0 bg-[#181a20] rounded-2xl p-4 flex flex-col">
@@ -278,7 +296,7 @@ export function TradingPage() {
         </div>
         <div className="w-[20%] flex flex-col p-2 gap-2">
           {/* 주문 창 */}
-          <div className="h-[50%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
+          <div className="h-[55%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
             {/* 매수/매도 탭 */}
             <div className="flex items-center gap-4 mb-4">
               <button
@@ -373,6 +391,47 @@ export function TradingPage() {
                 />
               </div>
 
+              {/* 퍼센트 수량 선택 */}
+              <div className="flex gap-1">
+                {[10, 25, 50, 100].map((pct) => (
+                  <button
+                    key={pct}
+                    onClick={() => {
+                      const orderPrice =
+                        priceType === "지정가"
+                          ? parseInt(price)
+                          : data?.stockInfo?.price
+                            ? parseFloat(data.stockInfo.price)
+                            : 0;
+
+                      if (orderType === "매수") {
+                        const availableMoney = accountData?.account?.money
+                          ? parseFloat(accountData.account.money)
+                          : 0;
+                        if (orderPrice > 0) {
+                          const qty = Math.floor(
+                            (availableMoney * pct) / 100 / orderPrice,
+                          );
+                          setQuantity(String(qty));
+                        }
+                      } else {
+                        const holding = accountData?.userStock?.find(
+                          (s) => s.stocks.id === stockId,
+                        );
+                        const canSell = holding?.canNumber
+                          ? parseInt(holding.canNumber)
+                          : 0;
+                        const qty = Math.floor((canSell * pct) / 100);
+                        setQuantity(String(qty));
+                      }
+                    }}
+                    className="flex-1 py-1 text-[10px] rounded bg-[#2b2f36] text-zinc-400 hover:text-white"
+                  >
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+
               {/* 주문 버튼 */}
               <button
                 onClick={handleOrder}
@@ -388,7 +447,7 @@ export function TradingPage() {
             </div>
           </div>
           {/* 등락률 순위 */}
-          <div className="h-[50%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
+          <div className="h-[45%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
             <div className="text-sm text-zinc-400 mb-3">실시간 등락률</div>
             <div className="flex-1 overflow-auto">
               <table className="w-full text-xs">
@@ -401,42 +460,29 @@ export function TradingPage() {
                   </tr>
                 </thead>
                 <tbody className="text-white">
-                  <tr className="border-b border-[#2b2f36]">
-                    <td className="py-1.5">1</td>
-                    <td className="py-1.5">삼성전자</td>
-                    <td className="text-right py-1.5">72,500</td>
-                    <td className="text-right py-1.5 text-[#f6465d]">+5.23%</td>
-                  </tr>
-                  <tr className="border-b border-[#2b2f36]">
-                    <td className="py-1.5">2</td>
-                    <td className="py-1.5">SK하이닉스</td>
-                    <td className="text-right py-1.5">135,000</td>
-                    <td className="text-right py-1.5 text-[#f6465d]">+3.85%</td>
-                  </tr>
-                  <tr className="border-b border-[#2b2f36]">
-                    <td className="py-1.5">3</td>
-                    <td className="py-1.5">NAVER</td>
-                    <td className="text-right py-1.5">218,500</td>
-                    <td className="text-right py-1.5 text-[#f6465d]">+2.15%</td>
-                  </tr>
-                  <tr className="border-b border-[#2b2f36]">
-                    <td className="py-1.5">4</td>
-                    <td className="py-1.5">카카오</td>
-                    <td className="text-right py-1.5">55,200</td>
-                    <td className="text-right py-1.5 text-[#f6465d]">+1.84%</td>
-                  </tr>
-                  <tr className="border-b border-[#2b2f36]">
-                    <td className="py-1.5">5</td>
-                    <td className="py-1.5">LG에너지솔루션</td>
-                    <td className="text-right py-1.5">385,000</td>
-                    <td className="text-right py-1.5 text-[#2563eb]">-0.52%</td>
-                  </tr>
-                  <tr className="border-b border-[#2b2f36]">
-                    <td className="py-1.5">6</td>
-                    <td className="py-1.5">현대차</td>
-                    <td className="text-right py-1.5">245,500</td>
-                    <td className="text-right py-1.5 text-[#2563eb]">-1.23%</td>
-                  </tr>
+                  {[...stocks]
+                    .sort((a, b) => parseFloat(b.per) - parseFloat(a.per))
+                    .map((stock, i) => {
+                      const per = parseFloat(stock.per);
+                      const perColor = per > 0 ? "text-[#f6465d]" : per < 0 ? "text-[#2563eb]" : "text-white";
+                      return (
+                        <tr key={stock.id} className="border-b border-[#2b2f36]">
+                          <td className="py-1.5">{i + 1}</td>
+                          <td className="py-1.5">{stock.name}</td>
+                          <td className="text-right py-1.5">{Number(stock.price).toLocaleString("ko-KR")}</td>
+                          <td className={`text-right py-1.5 ${perColor}`}>
+                            {per > 0 ? "+" : ""}{per.toFixed(2)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  {stocks.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-4 text-center text-zinc-500">
+                        종목 데이터 없음
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
