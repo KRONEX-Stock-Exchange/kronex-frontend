@@ -27,5 +27,5 @@ jobs:
           push: true
           tags: ghcr.io/kronex-stock-exchange/kronex-frontend:latest
           build-args: |
-            VITE_API_BASE_URL=http://52.78.231.115:3000/api
-            VITE_WS_BASE_URL=http://52.78.231.115:3003
+            VITE_API_BASE_URL=http://3.35.177.15:3000/api
+            VITE_WS_BASE_URL=http://3.35.177.15:3003
