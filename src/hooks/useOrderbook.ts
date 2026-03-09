@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
+import { WS_BASE_URL } from "../constants";
+import { tokenManager } from "../services/auth/tokenManager";
 
 export interface OrderbookItem {
   price: string;
@@ -15,6 +17,8 @@ export interface StockInfo {
   high: string;
   close: string;
   open: string;
+  upperLimit: string;
+  lowerLimit: string;
 }
 
 export interface OrderbookData {
@@ -27,30 +31,52 @@ export interface OrderbookData {
 export function useOrderbook(stockId: number) {
   const [data, setData] = useState<OrderbookData | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    const newSocket = io("ws://localhost:3003/stock", {
-      transports: ["websocket"],
-      withCredentials: true,
-    });
+    let active = true;
 
-    newSocket.on("connect", () => {
-      console.log("WebSocket connected");
-      newSocket.emit("joinStockRoom", stockId);
-    });
+    const connect = () => {
+      const newSocket = io(`${WS_BASE_URL}/stock`, {
+        transports: ["websocket"],
+        auth: { token: tokenManager.getToken() },
+      });
 
-    newSocket.on("stockUpdated", (receivedData: OrderbookData) => {
-      setData(receivedData);
-    });
+      newSocket.on("connect", () => {
+        newSocket.emit("joinStockRoom", stockId);
+      });
 
-    newSocket.on("disconnect", () => {
-      console.log("WebSocket disconnected");
-    });
+      newSocket.on("stockUpdated", (receivedData: OrderbookData) => {
+        setData(receivedData);
+      });
 
-    setSocket(newSocket);
+      newSocket.on("disconnect", () => {
+        console.log("WebSocket disconnected");
+      });
+
+      newSocket.on("errorCustom", async ({ message }: { message: string }) => {
+        if (message === "AccessToken이 만료되었습니다.") {
+          newSocket.disconnect();
+          const newToken = await tokenManager.refresh();
+          if (active && newToken) {
+            connect();
+          }
+        }
+      });
+
+      socketRef.current = newSocket;
+      setSocket(newSocket);
+    };
+
+    connect();
 
     return () => {
-      newSocket.disconnect();
+      active = false;
+      if (socketRef.current) {
+        socketRef.current.emit("leaveStockRoom", stockId);
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     };
   }, [stockId]);
 

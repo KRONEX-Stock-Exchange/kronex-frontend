@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router-dom";
 import { Layout } from "./components/layout";
+import { PrivateRoute } from "./components/auth/PrivateRoute";
 import { TradingPage } from "./pages/TradingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -12,7 +13,11 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <TradingPage />,
+        element: (
+          <PrivateRoute>
+            <TradingPage />
+          </PrivateRoute>
+        ),
       },
       {
         path: "login",
@@ -24,7 +29,11 @@ export const router = createBrowserRouter([
       },
       {
         path: "open-account",
-        element: <OpenAccountPage />,
+        element: (
+          <PrivateRoute>
+            <OpenAccountPage />
+          </PrivateRoute>
+        ),
       },
     ],
   },

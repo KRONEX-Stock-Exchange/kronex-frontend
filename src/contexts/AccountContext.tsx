@@ -6,7 +6,7 @@ interface AccountContextType {
   accounts: Account[];
   selectedAccount: Account | null;
   setSelectedAccount: (account: Account) => void;
-  fetchAccounts: () => Promise<void>;
+  fetchAccounts: () => Promise<Account[]>;
 }
 
 const AccountContext = createContext<AccountContextType | null>(null);
@@ -15,7 +15,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
 
-  const fetchAccounts = useCallback(async () => {
+  const fetchAccounts = useCallback(async (): Promise<Account[]> => {
     try {
       const response = await apiClient.get<Account[]>("/accounts");
       if (response.success && response.data) {
@@ -23,10 +23,12 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         if (response.data.length > 0 && !selectedAccount) {
           setSelectedAccount(response.data[0]);
         }
+        return response.data;
       }
     } catch {
       // silently fail
     }
+    return [];
   }, [selectedAccount]);
 
   useEffect(() => {

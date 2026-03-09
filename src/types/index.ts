@@ -104,6 +104,7 @@ export interface Account {
   id: number;
   accountNumber: number;
   money: string;
+  canMoney: string;
 }
 
 // API Error Type

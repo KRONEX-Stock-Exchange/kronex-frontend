@@ -78,6 +78,8 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
     { label: "시가", value: stockInfo.open, showPercent: false },
     { label: "고가", value: stockInfo.high, showPercent: true },
     { label: "저가", value: stockInfo.low, showPercent: true },
+    { label: "상한가", value: stockInfo.upperLimit, showPercent: true },
+    { label: "하한가", value: stockInfo.lowerLimit, showPercent: true },
   ];
 
   return (

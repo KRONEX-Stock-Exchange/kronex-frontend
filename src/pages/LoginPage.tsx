@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../services/api/client";
+import { tokenManager } from "../services/auth/tokenManager";
+import { useAccount } from "../contexts/AccountContext";
 
 interface LoginForm {
   username: string;
@@ -9,12 +11,19 @@ interface LoginForm {
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [form, setForm] = useState<LoginForm>({
-    username: "",
-    password: "",
-  });
+  const { fetchAccounts } = useAccount();
+  const [form, setForm] = useState<LoginForm>({ username: "", password: "" });
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const message = sessionStorage.getItem("authMessage");
+    if (message) {
+      setInfo(message);
+      sessionStorage.removeItem("authMessage");
+    }
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -26,12 +35,11 @@ export function LoginPage() {
     setError("");
 
     if (!form.username || !form.password) {
-      setError("사용자명과 비밀번호를 입력해주세요.");
+      setError("아이디와 비밀번호를 입력해주세요.");
       return;
     }
 
     setLoading(true);
-
     try {
       const response = await apiClient.post("/auth/signin", {
         username: form.username,
@@ -39,12 +47,18 @@ export function LoginPage() {
       });
 
       if (response.success) {
-        navigate("/");
+        const token = (response.data as { accessToken: string })?.accessToken;
+        if (token) tokenManager.setToken(token);
+        const accounts = await fetchAccounts();
+        if (accounts && accounts.length > 0) {
+          navigate("/");
+        } else {
+          navigate("/open-account");
+        }
       } else {
         const errorMsg =
           typeof response.error === "object" && response.error !== null
-            ? (response.error as { message?: string }).message ||
-              "로그인에 실패했습니다."
+            ? (response.error as { message?: string }).message || "로그인에 실패했습니다."
             : response.error || "로그인에 실패했습니다.";
         setError(errorMsg);
       }
@@ -56,67 +70,85 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0b0e11]">
-      <div className="w-full max-w-md p-8 bg-[#181a20] rounded-2xl">
-        <h1 className="text-2xl font-bold text-white mb-6 text-center">
-          Login
-        </h1>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* 사용자명 */}
-          <div>
-            <label className="text-sm text-zinc-400 mb-1 block">Username</label>
-            <input
-              type="text"
-              name="username"
-              value={form.username}
-              onChange={handleChange}
-              placeholder="Enter your username"
-              required
-              className="w-full bg-[#2b2f36] text-white px-4 py-3 rounded-lg border border-[#3b3f46] outline-none focus:border-[#f6465d] transition-colors"
-            />
+    <div className="min-h-screen flex items-center justify-center bg-[#0f0f12] px-4">
+      <div className="w-full max-w-100">
+        {/* 로고 */}
+        <div className="mb-10 text-center">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#78350F] mb-4">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+              <polygon points="3,25 14,3 25,25 14,16" fill="white"/>
+            </svg>
           </div>
+          <p className="text-xs font-bold tracking-widest mb-1"><span className="text-[#F59E0B]">K</span><span className="text-white">RONEX</span></p>
+          <h1 className="text-2xl font-bold text-white">다시 만나서 반가워요</h1>
+          <p className="text-[#8e8e93] text-sm mt-1">로그인하고 거래를 시작하세요</p>
+        </div>
 
-          {/* 비밀번호 */}
-          <div>
-            <label className="text-sm text-zinc-400 mb-1 block">Password</label>
-            <input
-              type="password"
-              name="password"
-              value={form.password}
-              onChange={handleChange}
-              placeholder="Enter your password"
-              required
-              className="w-full bg-[#2b2f36] text-white px-4 py-3 rounded-lg border border-[#3b3f46] outline-none focus:border-[#f6465d] transition-colors"
-            />
+        {/* 세션 만료 안내 */}
+        {info && (
+          <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-2xl bg-[#2c2300] border border-[#f6a609]/30">
+            <span className="text-[#f6a609] text-lg">⚠</span>
+            <p className="text-[#f6a609] text-sm">{info}</p>
           </div>
+        )}
 
-          {/* 에러 메시지 */}
-          {error && (
-            <div className="text-[#f6465d] text-sm text-center">{error}</div>
-          )}
+        {/* 폼 카드 */}
+        <div className="bg-[#1c1c1f] rounded-3xl p-6 border border-[#2a2a2d]">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-[#8e8e93]">아이디</label>
+              <input
+                type="text"
+                name="username"
+                value={form.username}
+                onChange={handleChange}
+                placeholder="아이디를 입력하세요"
+                autoComplete="username"
+                className="w-full bg-[#242427] text-white placeholder-[#48484a] px-4 py-3.5 rounded-xl border border-[#3a3a3d] outline-none focus:border-[#F59E0B] transition-colors text-sm"
+              />
+            </div>
 
-          {/* 로그인 버튼 */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 bg-[#f6465d] text-white font-bold rounded-lg hover:bg-[#d63850] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? "Processing..." : "Login"}
-          </button>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-[#8e8e93]">비밀번호</label>
+              <input
+                type="password"
+                name="password"
+                value={form.password}
+                onChange={handleChange}
+                placeholder="비밀번호를 입력하세요"
+                autoComplete="current-password"
+                className="w-full bg-[#242427] text-white placeholder-[#48484a] px-4 py-3.5 rounded-xl border border-[#3a3a3d] outline-none focus:border-[#F59E0B] transition-colors text-sm"
+              />
+            </div>
 
-          {/* 회원가입 링크 */}
-          <div className="text-center text-sm text-zinc-400">
-            Don't have an account?{" "}
+            {error && (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#2c0a0a] border border-[#FF3B30]/30">
+                <span className="text-[#FF3B30] text-sm">⚠</span>
+                <p className="text-[#FF3B30] text-xs">{error}</p>
+              </div>
+            )}
+
             <button
-              type="button"
-              onClick={() => navigate("/register")}
-              className="text-[#f6465d] hover:underline"
+              type="submit"
+              disabled={loading}
+              className="w-full py-3.5 bg-[#D97706] hover:bg-[#B45309] active:bg-[#92400E] text-white font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed mt-1 text-sm"
             >
-              Register
+              {loading ? "로그인 중..." : "로그인"}
             </button>
-          </div>
-        </form>
+          </form>
+        </div>
+
+        {/* 회원가입 링크 */}
+        <p className="text-center text-sm text-[#8e8e93] mt-6">
+          아직 계정이 없으신가요?{" "}
+          <button
+            type="button"
+            onClick={() => navigate("/register")}
+            className="text-[#F59E0B] font-semibold hover:underline"
+          >
+            회원가입
+          </button>
+        </p>
       </div>
     </div>
   );

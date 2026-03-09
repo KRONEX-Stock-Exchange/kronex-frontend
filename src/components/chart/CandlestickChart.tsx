@@ -8,6 +8,8 @@ import {
 import type { IChartApi, ISeriesApi } from "lightweight-charts";
 import { io } from "socket.io-client";
 import { apiClient } from "../../services/api/client";
+import { WS_BASE_URL } from "../../constants";
+import { tokenManager } from "../../services/auth/tokenManager";
 
 type ChartType = "1m" | "5m" | "15m" | "30m" | "60m" | "1d";
 
@@ -214,44 +216,64 @@ export function CandlestickChart({ stockId = 1 }: CandlestickChartProps) {
     });
 
     // WebSocket 실시간 차트 업데이트
-    const ws = io("ws://localhost:3003/stock", {
+    let wsActive = true;
+    let ws = io(`${WS_BASE_URL}/stock`, {
       transports: ["websocket"],
-      withCredentials: true,
+      auth: { token: tokenManager.getToken() },
     });
 
-    ws.on("connect", () => {
-      ws.emit("joinChartRoom", { stockId: 1, type: chartType });
-    });
+    const connectWs = (socket: ReturnType<typeof io>) => {
+      socket.on("connect", () => {
+        socket.emit("joinChartRoom", { stockId, type: chartType });
+      });
 
-    ws.on(`chartUpdated_${chartType}`, (items: ChartItem[]) => {
-      if (!items || items.length === 0) return;
+      socket.on(`chartUpdated_${chartType}`, (items: ChartItem[]) => {
+        if (!items || items.length === 0) return;
 
-      for (const item of items) {
-        const time = toChartTime(item.time, chartType) as never;
-        const open = parseFloat(item.open);
-        const high = parseFloat(item.high);
-        const low = parseFloat(item.low);
-        const close = parseFloat(item.close);
-        const volume = parseFloat(item.volume);
+        for (const item of items) {
+          const time = toChartTime(item.time, chartType) as never;
+          const open = parseFloat(item.open);
+          const high = parseFloat(item.high);
+          const low = parseFloat(item.low);
+          const close = parseFloat(item.close);
+          const volume = parseFloat(item.volume);
 
-        candlestickSeries.update({ time, open, high, low, close });
-        volumeSeries.update({
-          time,
-          value: volume,
-          color:
-            close >= open ? "rgba(246, 70, 93, 0.5)" : "rgba(37, 99, 235, 0.5)",
-        });
-      }
+          candlestickSeries.update({ time, open, high, low, close });
+          volumeSeries.update({
+            time,
+            value: volume,
+            color:
+              close >= open
+                ? "rgba(246, 70, 93, 0.5)"
+                : "rgba(37, 99, 235, 0.5)",
+          });
+        }
 
-      // 마지막 봉 퍼센트 업데이트
-      const lastItem = items[items.length - 1];
-      const lastClose = parseFloat(lastItem.close);
-      lastCandleInfoRef.current = {
-        ...lastCandleInfoRef.current,
-        close: lastClose,
-      };
-      requestAnimationFrame(updatePctLabel);
-    });
+        const lastItem = items[items.length - 1];
+        const lastClose = parseFloat(lastItem.close);
+        lastCandleInfoRef.current = {
+          ...lastCandleInfoRef.current,
+          close: lastClose,
+        };
+        requestAnimationFrame(updatePctLabel);
+      });
+
+      socket.on("errorCustom", async ({ message }: { message: string }) => {
+        if (message === "AccessToken이 만료되었습니다.") {
+          socket.disconnect();
+          const newToken = await tokenManager.refresh();
+          if (wsActive && newToken) {
+            ws = io(`${WS_BASE_URL}/stock`, {
+              transports: ["websocket"],
+              auth: { token: newToken },
+            });
+            connectWs(ws);
+          }
+        }
+      });
+    };
+
+    connectWs(ws);
 
     // 크로스헤어 이동 시 범례 업데이트
     chart.subscribeCrosshairMove((param) => {
@@ -308,6 +330,7 @@ export function CandlestickChart({ stockId = 1 }: CandlestickChartProps) {
     window.addEventListener("resize", handleResize);
 
     return () => {
+      wsActive = false;
       ws.disconnect();
       window.removeEventListener("resize", handleResize);
       chart.remove();

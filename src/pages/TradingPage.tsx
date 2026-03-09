@@ -15,7 +15,7 @@ interface StockItem {
 }
 
 export function TradingPage() {
-  const stockId = 1;
+  const [stockId, setStockId] = useState<number>(1);
   const { data } = useOrderbook(stockId);
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
   const { data: accountData, orderData } = useAccountData(selectedAccount?.id ?? null);
@@ -93,7 +93,12 @@ export function TradingPage() {
   return (
     <div className="flex flex-col h-full w-full">
       {/* 상단 주식 정보 헤더 */}
-      <StockHeader stockInfo={data?.stockInfo || null} />
+      <StockHeader
+        stockInfo={data?.stockInfo || null}
+        stocks={stocks}
+        selectedStockId={stockId}
+        onSelectStock={setStockId}
+      />
 
       {/* 메인 컨텐츠 */}
       <div className="flex flex-1 min-h-0 p-5 pb-5 pt-2">
@@ -136,14 +141,14 @@ export function TradingPage() {
             <div className="flex-1 min-h-0 overflow-auto">
               {accountTab === "내 계좌" && (
                 <>
-                  <div className="mb-3">
+                  <div className="mb-3 flex flex-col gap-2">
                     <select
                       value={selectedAccount?.id ?? ""}
                       onChange={(e) => {
                         const account = accounts.find((a) => a.id === Number(e.target.value));
                         if (account) setSelectedAccount(account);
                       }}
-                      className="bg-[#2b2f36] text-white text-xs px-3 py-1 rounded-lg border border-[#3b3f46] outline-none"
+                      className="bg-[#2b2f36] text-white text-xs px-3 py-1 rounded-lg border border-[#3b3f46] outline-none w-fit"
                     >
                       {accounts.map((account) => (
                         <option key={account.id} value={account.id}>
@@ -152,9 +157,21 @@ export function TradingPage() {
                       ))}
                     </select>
                     {accountData && (
-                      <span className="ml-3 text-[#0ecb81] text-xs font-semibold">
-                        {Number(accountData.account.money).toLocaleString("ko-KR")} KRW
-                      </span>
+                      <div className="flex gap-3 px-3 py-2 bg-[#2b2f36] rounded-lg border border-[#3b3f46]">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-zinc-500">예수금</span>
+                          <span className="text-xs text-white font-semibold">
+                            {Number(accountData.account.money).toLocaleString("ko-KR")} KRW
+                          </span>
+                        </div>
+                        <div className="w-px bg-[#3b3f46]" />
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-zinc-500">사용가능</span>
+                          <span className="text-xs text-[#0ecb81] font-semibold">
+                            {Number(accountData.account.canMoney).toLocaleString("ko-KR")} KRW
+                          </span>
+                        </div>
+                      </div>
                     )}
                   </div>
                   <table className="w-full text-xs">
@@ -298,7 +315,7 @@ export function TradingPage() {
           {/* 주문 창 */}
           <div className="h-[55%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
             {/* 매수/매도 탭 */}
-            <div className="flex items-center gap-4 mb-4">
+            <div className="flex items-center gap-4 mb-4 shrink-0">
               <button
                 onClick={() => setOrderType("매수")}
                 className={`text-sm ${
@@ -318,7 +335,7 @@ export function TradingPage() {
             </div>
 
             {/* 주문 폼 */}
-            <div className="flex flex-col gap-3 flex-1">
+            <div className="flex flex-col gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0">
               {/* 주문계좌 */}
               <div>
                 <label className="text-xs text-zinc-500 mb-1 block">주문계좌</label>
@@ -400,8 +417,8 @@ export function TradingPage() {
                       const orderPrice =
                         priceType === "지정가"
                           ? parseInt(price)
-                          : data?.stockInfo?.price
-                            ? parseFloat(data.stockInfo.price)
+                          : data?.stockInfo?.upperLimit
+                            ? parseFloat(data.stockInfo.upperLimit)
                             : 0;
 
                       if (orderType === "매수") {
@@ -436,7 +453,7 @@ export function TradingPage() {
               <button
                 onClick={handleOrder}
                 disabled={orderLoading}
-                className={`mt-auto py-3 rounded-lg text-sm font-bold disabled:opacity-50 ${
+                className={`py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${
                   orderType === "매수"
                     ? "bg-[#f6465d] text-white"
                     : "bg-[#2563eb] text-white"
