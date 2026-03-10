@@ -50,8 +50,8 @@ class ApiClient {
     return this.request<T>('PUT', endpoint, body);
   }
 
-  async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>('DELETE', endpoint);
+  async delete<T>(endpoint: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>('DELETE', endpoint, body);
   }
 }
 

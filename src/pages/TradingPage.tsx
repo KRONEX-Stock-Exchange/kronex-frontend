@@ -3,7 +3,7 @@ import { OrderBook } from "../components/orderbook/orderbook";
 import { StockHeader } from "../components/stock/StockHeader";
 import { CandlestickChart } from "../components/chart/CandlestickChart";
 import { useOrderbook } from "../hooks/useOrderbook";
-import { useAccountData } from "../hooks/useAccountData";
+import { useAccountData, type OrderItem } from "../hooks/useAccountData";
 import { useAccount } from "../contexts/AccountContext";
 import { apiClient } from "../services/api/client";
 
@@ -20,7 +20,7 @@ export function TradingPage() {
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
   const { data: accountData, orderData } = useAccountData(selectedAccount?.id ?? null);
   const [accountTab, setAccountTab] = useState<"내 계좌" | "체결" | "미체결">("내 계좌");
-  const [orderType, setOrderType] = useState<"매수" | "매도">("매수");
+  const [orderType, setOrderType] = useState<"매수" | "매도" | "정정" | "취소">("매수");
   const [priceType, setPriceType] = useState<"지정가" | "시장가">("지정가");
 
   // 주문 폼 상태
@@ -29,6 +29,12 @@ export function TradingPage() {
   const [orderLoading, setOrderLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [stocks, setStocks] = useState<StockItem[]>([]);
+
+  // 정정/취소 상태
+  const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
+  const [amendPrice, setAmendPrice] = useState("");
+  const [amendLoading, setAmendLoading] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
 
   useEffect(() => {
     const fetchStocks = async () => {
@@ -87,6 +93,58 @@ export function TradingPage() {
       showToast("서버 연결에 실패했습니다.", "error");
     } finally {
       setOrderLoading(false);
+    }
+  };
+
+  const handleAmend = async () => {
+    if (!selectedOrder || !amendPrice || parseInt(amendPrice) < 1) {
+      showToast("정정 가격을 입력해주세요.", "error");
+      return;
+    }
+    setAmendLoading(true);
+    try {
+      const response = await apiClient.put(`/orders/${selectedOrder.id}`, {
+        accountNumber: selectedAccount?.accountNumber,
+        price: parseInt(amendPrice),
+      });
+      if (response.success) {
+        showToast("주문이 정정되었습니다.", "success");
+        setSelectedOrder(null);
+        setAmendPrice("");
+      } else {
+        const errorMsg = typeof response.error === "object" && response.error !== null
+          ? (response.error as { message?: string }).message || "정정에 실패했습니다."
+          : response.error || "정정에 실패했습니다.";
+        showToast(errorMsg, "error");
+      }
+    } catch {
+      showToast("서버 연결에 실패했습니다.", "error");
+    } finally {
+      setAmendLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!selectedOrder) return;
+    setCancelLoading(true);
+    try {
+      const response = await apiClient.delete(`/orders/${selectedOrder.id}`, {
+        accountNumber: selectedAccount?.accountNumber,
+      });
+      if (response.success) {
+        showToast("주문이 취소되었습니다.", "success");
+        setSelectedOrder(null);
+        setAmendPrice("");
+      } else {
+        const errorMsg = typeof response.error === "object" && response.error !== null
+          ? (response.error as { message?: string }).message || "취소에 실패했습니다."
+          : response.error || "취소에 실패했습니다.";
+        showToast(errorMsg, "error");
+      }
+    } catch {
+      showToast("서버 연결에 실패했습니다.", "error");
+    } finally {
+      setCancelLoading(false);
     }
   };
 
@@ -269,7 +327,6 @@ export function TradingPage() {
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
                       <th className="text-left py-2">주문ID</th>
-                      <th className="text-left py-2">종목ID</th>
                       <th className="text-left py-2">종목명</th>
                       <th className="text-right py-2">유형</th>
                       <th className="text-right py-2">주문구분</th>
@@ -279,25 +336,35 @@ export function TradingPage() {
                     </tr>
                   </thead>
                   <tbody className="text-white">
-                    {orderData?.noExecutionOrder.map((order) => (
-                      <tr key={order.id} className="border-b border-[#2b2f36]">
-                        <td className="py-2">{order.id}</td>
-                        <td className="py-2">{order.stockId}</td>
-                        <td className="py-2">{order.stockName}</td>
-                        <td className={`text-right py-2 ${order.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}>
-                          {order.tradingType === "buy" ? "매수" : "매도"}
-                        </td>
-                        <td className="text-right py-2">
-                          {Number(order.price) === 0 ? "시장가" : "지정가"}
-                        </td>
-                        <td className="text-right py-2">{Number(order.number).toLocaleString("ko-KR")}</td>
-                        <td className="text-right py-2">{Number(order.price) === 0 ? "-" : Number(order.price).toLocaleString("ko-KR")}</td>
-                        <td className="text-right py-2">{(Number(order.number) - Number(order.matchNumber)).toLocaleString("ko-KR")}</td>
-                      </tr>
-                    ))}
+                    {orderData?.noExecutionOrder.map((order) => {
+                      const isSelected = selectedOrder?.id === order.id;
+                      return (
+                        <tr
+                          key={order.id}
+                          onClick={() => {
+                            setSelectedOrder(order);
+                            setAmendPrice(order.price);
+                            setOrderType("정정");
+                          }}
+                          className={`border-b border-[#2b2f36] cursor-pointer transition-colors ${isSelected ? "bg-[#2b2f36]" : "hover:bg-[#1f2230]"}`}
+                        >
+                          <td className="py-2">{order.id}</td>
+                          <td className="py-2">{order.stockName}</td>
+                          <td className={`text-right py-2 ${order.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}>
+                            {order.tradingType === "buy" ? "매수" : "매도"}
+                          </td>
+                          <td className="text-right py-2">
+                            {Number(order.price) === 0 ? "시장가" : "지정가"}
+                          </td>
+                          <td className="text-right py-2">{Number(order.number).toLocaleString("ko-KR")}</td>
+                          <td className="text-right py-2">{Number(order.price) === 0 ? "-" : Number(order.price).toLocaleString("ko-KR")}</td>
+                          <td className="text-right py-2">{(Number(order.number) - Number(order.matchNumber)).toLocaleString("ko-KR")}</td>
+                        </tr>
+                      );
+                    })}
                     {(!orderData || orderData.noExecutionOrder.length === 0) && (
                       <tr>
-                        <td colSpan={8} className="py-4 text-center text-zinc-500">
+                        <td colSpan={7} className="py-4 text-center text-zinc-500">
                           미체결 내역이 없습니다
                         </td>
                       </tr>
@@ -314,28 +381,20 @@ export function TradingPage() {
         <div className="w-[20%] flex flex-col p-2 gap-2">
           {/* 주문 창 */}
           <div className="h-[55%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
-            {/* 매수/매도 탭 */}
-            <div className="flex items-center gap-4 mb-4 shrink-0">
-              <button
-                onClick={() => setOrderType("매수")}
-                className={`text-sm ${
-                  orderType === "매수" ? "text-[#f6465d]" : "text-zinc-400"
-                }`}
-              >
-                매수
-              </button>
-              <button
-                onClick={() => setOrderType("매도")}
-                className={`text-sm ${
-                  orderType === "매도" ? "text-[#2563eb]" : "text-zinc-400"
-                }`}
-              >
-                매도
-              </button>
+            {/* 매수/매도/정정/취소 탭 */}
+            <div className="flex items-center gap-3 mb-4 shrink-0 border-b border-[#2b2f36] pb-3">
+              <button onClick={() => setOrderType("매수")} className={`text-sm ${orderType === "매수" ? "text-[#f6465d] font-bold" : "text-zinc-400"}`}>매수</button>
+              <button onClick={() => setOrderType("매도")} className={`text-sm ${orderType === "매도" ? "text-[#2563eb] font-bold" : "text-zinc-400"}`}>매도</button>
+              <div className="w-px h-3 bg-[#2b2f36]" />
+              <button onClick={() => setOrderType("정정")} className={`text-sm ${orderType === "정정" ? "text-[#F59E0B] font-bold" : "text-zinc-400"}`}>정정</button>
+              <button onClick={() => setOrderType("취소")} className={`text-sm ${orderType === "취소" ? "text-zinc-300 font-bold" : "text-zinc-400"}`}>취소</button>
             </div>
 
             {/* 주문 폼 */}
             <div className="flex flex-col gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0">
+
+              {/* ── 매수/매도 폼 ── */}
+              {(orderType === "매수" || orderType === "매도") && (<>
               {/* 주문계좌 */}
               <div>
                 <label className="text-xs text-zinc-500 mb-1 block">주문계좌</label>
@@ -348,9 +407,7 @@ export function TradingPage() {
                   className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
                 >
                   {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.accountNumber}
-                    </option>
+                    <option key={account.id} value={account.id}>{account.accountNumber}</option>
                   ))}
                 </select>
               </div>
@@ -359,26 +416,8 @@ export function TradingPage() {
               <div>
                 <label className="text-xs text-zinc-500 mb-1 block">주문유형</label>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setPriceType("지정가")}
-                    className={`flex-1 py-2 text-xs rounded-lg ${
-                      priceType === "지정가"
-                        ? "bg-[#2b2f36] text-white border border-[#3b3f46]"
-                        : "bg-transparent text-zinc-400 border border-[#2b2f36]"
-                    }`}
-                  >
-                    지정가
-                  </button>
-                  <button
-                    onClick={() => setPriceType("시장가")}
-                    className={`flex-1 py-2 text-xs rounded-lg ${
-                      priceType === "시장가"
-                        ? "bg-[#2b2f36] text-white border border-[#3b3f46]"
-                        : "bg-transparent text-zinc-400 border border-[#2b2f36]"
-                    }`}
-                  >
-                    시장가
-                  </button>
+                  <button onClick={() => setPriceType("지정가")} className={`flex-1 py-2 text-xs rounded-lg ${priceType === "지정가" ? "bg-[#2b2f36] text-white border border-[#3b3f46]" : "bg-transparent text-zinc-400 border border-[#2b2f36]"}`}>지정가</button>
+                  <button onClick={() => setPriceType("시장가")} className={`flex-1 py-2 text-xs rounded-lg ${priceType === "시장가" ? "bg-[#2b2f36] text-white border border-[#3b3f46]" : "bg-transparent text-zinc-400 border border-[#2b2f36]"}`}>시장가</button>
                 </div>
               </div>
 
@@ -386,26 +425,14 @@ export function TradingPage() {
               {priceType === "지정가" && (
                 <div>
                   <label className="text-xs text-zinc-500 mb-1 block">가격</label>
-                  <input
-                    type="number"
-                    placeholder="0"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
-                  />
+                  <input type="number" placeholder="0" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none" />
                 </div>
               )}
 
               {/* 수량 */}
               <div>
                 <label className="text-xs text-zinc-500 mb-1 block">수량</label>
-                <input
-                  type="number"
-                  placeholder="0"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
-                />
+                <input type="number" placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none" />
               </div>
 
               {/* 퍼센트 수량 선택 */}
@@ -454,13 +481,98 @@ export function TradingPage() {
                 onClick={handleOrder}
                 disabled={orderLoading}
                 className={`py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${
-                  orderType === "매수"
-                    ? "bg-[#f6465d] text-white"
-                    : "bg-[#2563eb] text-white"
+                  orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"
                 }`}
               >
                 {orderLoading ? "처리중..." : orderType}
               </button>
+            </>)}
+
+            {/* ── 정정 폼 ── */}
+            {orderType === "정정" && (
+              <>
+                {selectedOrder ? (
+                  <>
+                    <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex flex-col gap-1">
+                      <span className="text-zinc-400">주문 #{selectedOrder.id}</span>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">종목</span>
+                        <span className="text-white">{selectedOrder.stockName}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">유형</span>
+                        <span className={selectedOrder.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}>
+                          {selectedOrder.tradingType === "buy" ? "매수" : "매도"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">현재 가격</span>
+                        <span className="text-white">{Number(selectedOrder.price).toLocaleString("ko-KR")}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-zinc-500 mb-1 block">정정 가격</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={amendPrice}
+                        onChange={(e) => setAmendPrice(e.target.value)}
+                        className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B]"
+                      />
+                    </div>
+                    <button
+                      onClick={handleAmend}
+                      disabled={amendLoading}
+                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#F59E0B] text-gray-900"
+                    >
+                      {amendLoading ? "처리중..." : "정정 확인"}
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-xs text-zinc-500 text-center py-6">미체결 탭에서 주문을 선택하세요</p>
+                )}
+              </>
+            )}
+
+            {/* ── 취소 폼 ── */}
+            {orderType === "취소" && (
+              <>
+                {selectedOrder ? (
+                  <>
+                    <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex flex-col gap-1">
+                      <span className="text-zinc-400">주문 #{selectedOrder.id}</span>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">종목</span>
+                        <span className="text-white">{selectedOrder.stockName}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">유형</span>
+                        <span className={selectedOrder.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}>
+                          {selectedOrder.tradingType === "buy" ? "매수" : "매도"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">수량</span>
+                        <span className="text-white">{Number(selectedOrder.number).toLocaleString("ko-KR")}주</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">가격</span>
+                        <span className="text-white">{Number(selectedOrder.price) === 0 ? "시장가" : Number(selectedOrder.price).toLocaleString("ko-KR")}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleCancel}
+                      disabled={cancelLoading}
+                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-transparent border border-[#f6465d] text-[#f6465d] hover:bg-[#f6465d]/10"
+                    >
+                      {cancelLoading ? "처리중..." : "주문 취소 확인"}
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-xs text-zinc-500 text-center py-6">미체결 탭에서 주문을 선택하세요</p>
+                )}
+              </>
+            )}
             </div>
           </div>
           {/* 등락률 순위 */}
