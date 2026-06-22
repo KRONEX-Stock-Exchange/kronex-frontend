@@ -99,11 +99,25 @@ export interface User {
   createdAt: number;
 }
 
+// Account Types
+export interface Account {
+  id: number;
+  accountNumber: number;
+  money: string;
+  canMoney: string;
+}
+
+// API Error Type
+export interface ApiError {
+  errorCode: string;
+  message: string;
+}
+
 // API Response Types
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
-  error?: string;
+  error?: string | ApiError;
 }
 
 // WebSocket Message Types
