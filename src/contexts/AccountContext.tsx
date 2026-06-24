@@ -17,13 +17,16 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
 
   const fetchAccounts = useCallback(async (): Promise<Account[]> => {
     try {
-      const response = await apiClient.get<Account[]>("/accounts");
+      const response = await apiClient.get<Account[] | Record<string, Account>>("/accounts");
       if (response.success && response.data) {
-        setAccounts(response.data);
-        if (response.data.length > 0 && !selectedAccount) {
-          setSelectedAccount(response.data[0]);
+        const data = Array.isArray(response.data)
+          ? response.data
+          : Object.values(response.data);
+        setAccounts(data);
+        if (data.length > 0 && !selectedAccount) {
+          setSelectedAccount(data[0]);
         }
-        return response.data;
+        return data;
       }
     } catch {
       // silently fail

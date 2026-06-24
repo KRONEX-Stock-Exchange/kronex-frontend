@@ -1,3 +1,5 @@
+const toNum = (s: string) => { const n = parseFloat(s); return isNaN(n) ? 0 : n; };
+
 type TickProps = {
   type: "sell" | "buy";
   price: string;
@@ -21,8 +23,8 @@ export function Tick({
   highPrice,
   lowPrice,
 }: TickProps) {
-  const priceNum = parseFloat(price);
-  const numberNum = parseFloat(number);
+  const priceNum = toNum(price);
+  const numberNum = toNum(number);
 
   // 등락률 계산 (전일종가 대비)
   const changePercent =

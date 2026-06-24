@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>STEX 디자인 시안</title>
+<style>
+  * { margin:0;padding:0;box-sizing:border-box; }
+  body { background:#0b0e11; color:#eaecef; font-family:'Inter',sans-serif; padding:40px; }
+  h1 { color:#f0b90b; font-size:24px; letter-spacing:3px; margin-bottom:8px; }
+  p { color:#848e9c; font-size:13px; margin-bottom:40px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:20px; }
+  .card { background:#161a1e; border:1px solid #2b2f36; border-radius:8px; overflow:hidden; cursor:pointer; transition:border-color 0.2s, transform 0.2s; }
+  .card:hover { border-color:#f0b90b; transform:translateY(-2px); }
+  .preview { height:180px; display:flex; align-items:center; justify-content:center; font-size:48px; }
+  .d1 { background:linear-gradient(135deg,#0b0e11,#161a1e); border-bottom:1px solid #2b2f36; }
+  .d2 { background:linear-gradient(135deg,#0d1117,#161b22); border-bottom:1px solid #21262d; }
+  .d3 { background:linear-gradient(135deg,#08080f,#12001a); border-bottom:1px solid rgba(255,45,135,0.3); }
+  .d4 { background:linear-gradient(135deg,#111,#181818); border-bottom:1px solid #222; }
+  .d5 { background:linear-gradient(135deg,#050d1e,#0a1628); border-bottom:1px solid rgba(78,158,255,0.2); }
+  .info { padding:16px; }
+  .design-num { font-size:10px; color:#848e9c; letter-spacing:2px; margin-bottom:4px; }
+  .design-name { font-size:15px; font-weight:600; margin-bottom:6px; }
+  .design-desc { font-size:11px; color:#848e9c; line-height:1.5; }
+  .tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .tag { font-size:9px; padding:3px 8px; border-radius:20px; border:1px solid; }
+  .open-btn { display:block; margin-top:12px; padding:8px; text-align:center; font-size:12px; border-radius:4px; text-decoration:none; font-weight:600; transition:background 0.2s; }
+</style>
+</head>
+<body>
+<h1>◈ STEX 디자인 시안</h1>
+<p>바이낸스 스타일 거래소 UI 5가지 디자인 콘셉트 — 호가창 구성 동일, 레이아웃 & 테마 변주</p>
+
+<div class="grid">
+  <div class="card">
+    <div class="preview d1"><span>🏛️</span></div>
+    <div class="info">
+      <div class="design-num">DESIGN 01</div>
+      <div class="design-name" style="color:#f0b90b">Binance Classic Dark</div>
+      <div class="design-desc">바이낸스 공식 레이아웃 오마주. 차트 중심 + 우측 호가창 + 하단 주문폼. 가장 익숙하고 안정적인 UX.</div>
+      <div class="tags">
+        <span class="tag" style="color:#f0b90b;border-color:#f0b90b40">골드 강조</span>
+        <span class="tag" style="color:#0ecb81;border-color:#0ecb8140">초록 매수</span>
+        <span class="tag" style="color:#848e9c;border-color:#2b2f36">Classic</span>
+      </div>
+      <a href="design1-binance-classic.html" class="open-btn" style="background:#f0b90b;color:#000">열기 →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="preview d2"><span>💻</span></div>
+    <div class="info">
+      <div class="design-num">DESIGN 02</div>
+      <div class="design-name" style="color:#58a6ff">Split Pro</div>
+      <div class="design-desc">Bloomberg 터미널 감성. JetBrains Mono 폰트, 3열 분할 레이아웃 (호가창 좌 · 차트 중 · 주문 우). 정보 밀도 최대.</div>
+      <div class="tags">
+        <span class="tag" style="color:#58a6ff;border-color:#58a6ff40">블루 강조</span>
+        <span class="tag" style="color:#3fb950;border-color:#3fb95040">초록 매수</span>
+        <span class="tag" style="color:#848e9c;border-color:#30363d">Pro Terminal</span>
+      </div>
+      <a href="design2-split-pro.html" class="open-btn" style="background:#58a6ff;color:#000">열기 →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="preview d3"><span>⚡</span></div>
+    <div class="info">
+      <div class="design-num">DESIGN 03</div>
+      <div class="design-name" style="color:#ff2d87">Neon Cyberpunk</div>
+      <div class="design-desc">다크 퍼플 배경에 핑크/라임 네온 글로우. 글래스모피즘 카드, 3열 배치. 트렌디하고 임팩트 있는 비주얼.</div>
+      <div class="tags">
+        <span class="tag" style="color:#ff2d87;border-color:#ff2d8740">핑크 네온</span>
+        <span class="tag" style="color:#39ff14;border-color:#39ff1440">라임 매수</span>
+        <span class="tag" style="color:#a855f7;border-color:#a855f740">Glassmorphism</span>
+      </div>
+      <a href="design3-neon-cyberpunk.html" class="open-btn" style="background:#ff2d87;color:#fff">열기 →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="preview d4"><span>⬜</span></div>
+    <div class="info">
+      <div class="design-num">DESIGN 04</div>
+      <div class="design-name" style="color:#ccc">Minimal Mono</div>
+      <div class="design-desc">IBM Plex Mono 단일 폰트, 흑백 기조. 호가창 좌 + 차트 우 2열 구조 + 하단 인라인 주문폼. 집중감 최대.</div>
+      <div class="tags">
+        <span class="tag" style="color:#ccc;border-color:#333">흑백 모노</span>
+        <span class="tag" style="color:#55aa77;border-color:#55aa7740">절제 그린</span>
+        <span class="tag" style="color:#888;border-color:#333">Minimal</span>
+      </div>
+      <a href="design4-minimal-mono.html" class="open-btn" style="background:#333;color:#ccc">열기 →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="preview d5"><span>🌊</span></div>
+    <div class="info">
+      <div class="design-num">DESIGN 05</div>
+      <div class="design-name" style="color:#4e9eff">Deep Navy Premium</div>
+      <div class="design-desc">딥 네이비 그라디언트 배경, 소프트 블루 강조. 호가창 좌 + 차트+주문폼 중 + 포트폴리오 우측. 고급스러운 프리미엄 느낌.</div>
+      <div class="tags">
+        <span class="tag" style="color:#4e9eff;border-color:#4e9eff40">네이비 블루</span>
+        <span class="tag" style="color:#48bb78;border-color:#48bb7840">초록 매수</span>
+        <span class="tag" style="color:#9b8ff5;border-color:#9b8ff540">Premium</span>
+      </div>
+      <a href="design5-deep-navy.html" class="open-btn" style="background:#4e9eff;color:#000">열기 →</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>

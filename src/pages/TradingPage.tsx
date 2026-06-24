@@ -14,37 +14,52 @@ interface StockItem {
   per: string;
 }
 
+const fmtWon = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+type OrderTypeTab = "매수" | "매도" | "정정" | "취소";
+type AccountTab = "내 계좌" | "체결" | "미체결";
+
 export function TradingPage() {
-  const [stockId, setStockId] = useState<number>(1);
+  const [stockId, setStockId] = useState<number | null>(null);
   const { data } = useOrderbook(stockId);
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
-  const { data: accountData, orderData } = useAccountData(selectedAccount?.id ?? null);
-  const [accountTab, setAccountTab] = useState<"내 계좌" | "체결" | "미체결">("내 계좌");
-  const [orderType, setOrderType] = useState<"매수" | "매도" | "정정" | "취소">("매수");
-  const [priceType, setPriceType] = useState<"지정가" | "시장가">("지정가");
+  const { data: accountData, orderData } = useAccountData(
+    selectedAccount?.id ?? null,
+  );
 
-  // 주문 폼 상태
+  const [accountTab, setAccountTab] = useState<AccountTab>("내 계좌");
+  const [orderType, setOrderType] = useState<OrderTypeTab>("매수");
+  const [priceType, setPriceType] = useState<"지정가" | "시장가">("지정가");
   const [price, setPrice] = useState("");
   const [quantity, setQuantity] = useState("");
   const [orderLoading, setOrderLoading] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [stocks, setStocks] = useState<StockItem[]>([]);
 
-  // 정정/취소 상태
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
+
   const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
   const [amendPrice, setAmendPrice] = useState("");
   const [amendLoading, setAmendLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
+
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferTo, setTransferTo] = useState("");
+  const [transferLoading, setTransferLoading] = useState(false);
 
   useEffect(() => {
     const fetchStocks = async () => {
       const response = await apiClient.get<StockItem[]>("/stocks");
       if (response.success && response.data) {
         setStocks(response.data);
+        setStockId((prev) => prev ?? response.data![0]?.id ?? null);
       }
     };
     fetchStocks();
-    const interval = setInterval(fetchStocks, 5000);
+    const interval = setInterval(fetchStocks, 300000);
     return () => clearInterval(interval);
   }, []);
 
@@ -53,42 +68,34 @@ export function TradingPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const getErrorMsg = (error: unknown, fallback: string) =>
+    typeof error === "object" && error !== null
+      ? ((error as { message?: string }).message ?? fallback)
+      : ((error as string) ?? fallback);
+
   const handleOrder = async () => {
     const qty = parseInt(quantity);
     const prc = parseInt(price);
-
-    if (!quantity || qty < 1) {
-      showToast("수량은 1주 이상 입력해주세요.", "error");
-      return;
-    }
-    if (priceType === "지정가" && (!price || prc < 1)) {
-      showToast("가격은 1원 이상 입력해주세요.", "error");
-      return;
-    }
-
+    if (!quantity || qty < 1)
+      return showToast("수량은 1주 이상 입력해주세요.", "error");
+    if (priceType === "지정가" && (!price || prc < 1))
+      return showToast("가격은 1원 이상 입력해주세요.", "error");
     setOrderLoading(true);
-
     try {
-      const endpoint = orderType === "매수"
-        ? `/stocks/${stockId}/orders/buy`
-        : `/stocks/${stockId}/orders/sell`;
-
+      const endpoint =
+        orderType === "매수"
+          ? `/stocks/${stockId}/orders/buy`
+          : `/stocks/${stockId}/orders/sell`;
       const response = await apiClient.post(endpoint, {
         accountNumber: selectedAccount?.accountNumber,
         price: priceType === "지정가" ? prc : 0,
-        number: qty,
-        orderType: priceType === "지정가" ? "limit" : "market",
+        quantity: qty,
+        orderType: priceType === "지정가" ? "LIMIT" : "MARKET",
       });
-
-      if (response.success) {
+      if (response.success)
         showToast(`${orderType} 주문이 완료되었습니다.`, "success");
-      } else {
-        const errorMsg =
-          typeof response.error === "object" && response.error !== null
-            ? (response.error as { message?: string }).message || "주문에 실패했습니다."
-            : response.error || "주문에 실패했습니다.";
-        showToast(errorMsg, "error");
-      }
+      else
+        showToast(getErrorMsg(response.error, "주문에 실패했습니다."), "error");
     } catch {
       showToast("서버 연결에 실패했습니다.", "error");
     } finally {
@@ -97,10 +104,8 @@ export function TradingPage() {
   };
 
   const handleAmend = async () => {
-    if (!selectedOrder || !amendPrice || parseInt(amendPrice) < 1) {
-      showToast("정정 가격을 입력해주세요.", "error");
-      return;
-    }
+    if (!selectedOrder || !amendPrice || parseInt(amendPrice) < 1)
+      return showToast("정정 가격을 입력해주세요.", "error");
     setAmendLoading(true);
     try {
       const response = await apiClient.put(`/orders/${selectedOrder.id}`, {
@@ -112,10 +117,7 @@ export function TradingPage() {
         setSelectedOrder(null);
         setAmendPrice("");
       } else {
-        const errorMsg = typeof response.error === "object" && response.error !== null
-          ? (response.error as { message?: string }).message || "정정에 실패했습니다."
-          : response.error || "정정에 실패했습니다.";
-        showToast(errorMsg, "error");
+        showToast(getErrorMsg(response.error, "정정에 실패했습니다."), "error");
       }
     } catch {
       showToast("서버 연결에 실패했습니다.", "error");
@@ -136,10 +138,7 @@ export function TradingPage() {
         setSelectedOrder(null);
         setAmendPrice("");
       } else {
-        const errorMsg = typeof response.error === "object" && response.error !== null
-          ? (response.error as { message?: string }).message || "취소에 실패했습니다."
-          : response.error || "취소에 실패했습니다.";
-        showToast(errorMsg, "error");
+        showToast(getErrorMsg(response.error, "취소에 실패했습니다."), "error");
       }
     } catch {
       showToast("서버 연결에 실패했습니다.", "error");
@@ -148,91 +147,127 @@ export function TradingPage() {
     }
   };
 
+  const handleTransfer = async () => {
+    const amount = parseInt(transferAmount);
+    const toAccountNumber = parseInt(transferTo);
+    if (!amount || amount < 1)
+      return showToast("금액을 입력해주세요.", "error");
+    if (!toAccountNumber)
+      return showToast("받는 계좌번호를 입력해주세요.", "error");
+    if (!selectedAccount) return showToast("계좌를 선택해주세요.", "error");
+    setTransferLoading(true);
+    try {
+      const response = await apiClient.post(
+        `/accounts/${selectedAccount.accountNumber}/transfer`,
+        {
+          amount,
+          toAccountNumber,
+        },
+      );
+      if (response.success) {
+        showToast("송금이 완료되었습니다.", "success");
+        setShowTransfer(false);
+        setTransferAmount("");
+        setTransferTo("");
+      } else {
+        showToast(getErrorMsg(response.error, "송금에 실패했습니다."), "error");
+      }
+    } catch {
+      showToast("서버 연결에 실패했습니다.", "error");
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
+  const selectOrder = (order: OrderItem) => {
+    setSelectedOrder(order);
+    setAmendPrice(order.price);
+    setOrderType("정정");
+  };
+
   return (
     <div className="flex flex-col h-full w-full">
-      {/* 상단 주식 정보 헤더 */}
       <StockHeader
-        stockInfo={data?.stockInfo || null}
+        stockInfo={data?.stockInfo ?? null}
         stocks={stocks}
         selectedStockId={stockId}
         onSelectStock={setStockId}
       />
 
-      {/* 메인 컨텐츠 */}
       <div className="flex flex-1 min-h-0 p-5 pb-5 pt-2">
-        {/* 차트 영역 (6:4 분할) */}
+        {/* 좌: 차트 + 계좌 */}
         <div className="w-[50%] min-h-0 flex flex-col p-2 gap-2">
-          {/* 차트 (60%) */}
-          <div className="h-[60%]">
+          <div className="h-[52%]">
             <CandlestickChart stockId={stockId} />
           </div>
-          {/* 내 계좌 (40%) */}
-          <div className="h-[40%] min-h-0 bg-[#181a20] rounded-2xl p-4 flex flex-col">
-            {/* 탭 */}
-            <div className="flex items-center gap-4 mb-3">
-              <button
-                onClick={() => setAccountTab("내 계좌")}
-                className={`text-sm ${
-                  accountTab === "내 계좌" ? "text-white" : "text-zinc-400"
-                }`}
-              >
-                내 계좌
-              </button>
-              <button
-                onClick={() => setAccountTab("체결")}
-                className={`text-sm ${
-                  accountTab === "체결" ? "text-white" : "text-zinc-400"
-                }`}
-              >
-                체결
-              </button>
-              <button
-                onClick={() => setAccountTab("미체결")}
-                className={`text-sm ${
-                  accountTab === "미체결" ? "text-white" : "text-zinc-400"
-                }`}
-              >
-                미체결
-              </button>
+          <div className="h-[48%] min-h-0 bg-[#181a20] rounded-2xl p-4 flex flex-col">
+            <div className="flex items-center gap-4 mb-3 shrink-0">
+              {(["내 계좌", "체결", "미체결"] as AccountTab[]).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setAccountTab(tab)}
+                  className={`text-sm ${accountTab === tab ? "text-white" : "text-zinc-400"}`}
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
-            {/* 테이블 내용 */}
-            <div className="flex-1 min-h-0 overflow-auto">
+
+            <div className="flex-1 min-h-0 overflow-auto scrollbar-thin">
               {accountTab === "내 계좌" && (
                 <>
                   <div className="mb-3 flex flex-col gap-2">
                     <select
                       value={selectedAccount?.id ?? ""}
                       onChange={(e) => {
-                        const account = accounts.find((a) => a.id === Number(e.target.value));
+                        const account = accounts.find(
+                          (a) => a.id === Number(e.target.value),
+                        );
                         if (account) setSelectedAccount(account);
                       }}
                       className="bg-[#2b2f36] text-white text-xs px-3 py-1 rounded-lg border border-[#3b3f46] outline-none w-fit"
                     >
-                      {accounts.map((account) => (
-                        <option key={account.id} value={account.id}>
-                          {account.accountNumber}
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.accountNumber}
                         </option>
                       ))}
                     </select>
                     {accountData && (
-                      <div className="flex gap-3 px-3 py-2 bg-[#2b2f36] rounded-lg border border-[#3b3f46]">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[10px] text-zinc-500">예수금</span>
-                          <span className="text-xs text-white font-semibold">
-                            {Number(accountData.account.money).toLocaleString("ko-KR")} KRW
+                      <div className="grid grid-cols-[minmax(130px,1fr)_1px_minmax(130px,1fr)] gap-3 px-3 py-2 bg-[#2b2f36] rounded-lg border border-[#3b3f46]">
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className="text-[10px] text-zinc-500">
+                            예수금
+                          </span>
+                          <span className="inline-block min-w-[104px] whitespace-nowrap text-xs text-white font-semibold tabular-nums">
+                            {fmtWon(accountData.account.balance)}{" "}
+                            KRW
                           </span>
                         </div>
                         <div className="w-px bg-[#3b3f46]" />
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[10px] text-zinc-500">사용가능</span>
-                          <span className="text-xs text-[#0ecb81] font-semibold">
-                            {Number(accountData.account.canMoney).toLocaleString("ko-KR")} KRW
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className="text-[10px] text-zinc-500">
+                            사용가능
+                          </span>
+                          <span className="inline-block min-w-[104px] whitespace-nowrap text-xs text-[#0ecb81] font-semibold tabular-nums">
+                            {fmtWon(accountData.account.availableBalance)}{" "}
+                            KRW
                           </span>
                         </div>
                       </div>
                     )}
                   </div>
-                  <table className="w-full text-xs">
+                  <table className="w-full min-w-[760px] table-fixed text-xs">
+                    <colgroup>
+                      <col className="w-[18%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[13%]" />
+                    </colgroup>
                     <thead className="text-zinc-500 border-b border-[#2b2f36]">
                       <tr>
                         <th className="text-left py-2">종목명</th>
@@ -246,33 +281,59 @@ export function TradingPage() {
                       </tr>
                     </thead>
                     <tbody className="text-white">
-                      {accountData?.userStock.map((stock) => {
-                        const currentPrice = Number(stock.stocks.price);
+                      {accountData?.holdings.map((stock) => {
+                        const cur = Number(stock.stock.price);
                         const avg = Number(stock.average);
-                        const qty = Number(stock.number);
-                        const profitRate = avg > 0 ? ((currentPrice - avg) / avg) * 100 : 0;
-                        const profitAmount = (currentPrice - avg) * qty;
-                        const profitColor = profitRate > 0 ? "text-[#f6465d]" : profitRate < 0 ? "text-[#2563eb]" : "text-white";
+                        const qty = Number(stock.quantity);
+                        const rate = avg > 0 ? ((cur - avg) / avg) * 100 : 0;
+                        const amount = (cur - avg) * qty;
+                        const color =
+                          rate > 0
+                            ? "text-[#f6465d]"
+                            : rate < 0
+                              ? "text-[#2563eb]"
+                              : "text-white";
                         return (
-                          <tr key={stock.stocks.id} className="border-b border-[#2b2f36]">
-                            <td className="py-2">{stock.stocks.name}</td>
-                            <td className="text-right py-2">{qty.toLocaleString("ko-KR")}</td>
-                            <td className="text-right py-2">{Number(stock.canNumber).toLocaleString("ko-KR")}</td>
-                            <td className="text-right py-2">{avg.toLocaleString("ko-KR")}</td>
-                            <td className="text-right py-2">{currentPrice.toLocaleString("ko-KR")}</td>
-                            <td className="text-right py-2">{Number(stock.totalBuyAmount).toLocaleString("ko-KR")}</td>
-                            <td className={`text-right py-2 ${profitColor}`}>
-                              {profitRate > 0 ? "+" : ""}{profitRate.toFixed(2)}%
+                          <tr
+                            key={stock.stock.id}
+                            onClick={() => { if (stock.stock.id !== stockId) setStockId(stock.stock.id); }}
+                            className={`border-b border-[#2b2f36] cursor-pointer hover:bg-[#2b2f36] transition-colors ${stock.stock.id === stockId ? "bg-[#23272f]" : ""}`}
+                          >
+                            <td className="py-2 pr-2 truncate">{stock.stock.name}</td>
+                            <td className="text-right py-2 tabular-nums">
+                              {qty.toLocaleString("ko-KR")}
                             </td>
-                            <td className={`text-right py-2 ${profitColor}`}>
-                              {profitAmount > 0 ? "+" : ""}{profitAmount.toLocaleString("ko-KR")}
+                            <td className="text-right py-2 tabular-nums">
+                              {Number(stock.availableQuantity).toLocaleString("ko-KR")}
+                            </td>
+                            <td className="text-right py-2 tabular-nums">
+                              {avg.toLocaleString("ko-KR")}
+                            </td>
+                            <td className="text-right py-2 tabular-nums">
+                              {cur.toLocaleString("ko-KR")}
+                            </td>
+                            <td className="text-right py-2 tabular-nums">
+                              {Number(stock.totalBuyAmount).toLocaleString(
+                                "ko-KR",
+                              )}
+                            </td>
+                            <td className={`text-right py-2 tabular-nums ${color}`}>
+                              {rate > 0 ? "+" : ""}
+                              {rate.toFixed(2)}%
+                            </td>
+                            <td className={`text-right py-2 tabular-nums ${color}`}>
+                              {amount > 0 ? "+" : ""}
+                              {amount.toLocaleString("ko-KR")}
                             </td>
                           </tr>
                         );
                       })}
-                      {(!accountData || accountData.userStock.length === 0) && (
+                      {(!accountData || accountData.holdings.length === 0) && (
                         <tr>
-                          <td colSpan={8} className="py-4 text-center text-zinc-500">
+                          <td
+                            colSpan={8}
+                            className="py-4 text-center text-zinc-500"
+                          >
                             보유 종목이 없습니다
                           </td>
                         </tr>
@@ -281,40 +342,60 @@ export function TradingPage() {
                   </table>
                 </>
               )}
+
               {accountTab === "체결" && (
                 <table className="w-full text-xs">
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
                       <th className="text-left py-2">주문ID</th>
-                      <th className="text-left py-2">종목ID</th>
                       <th className="text-left py-2">종목명</th>
                       <th className="text-right py-2">유형</th>
                       <th className="text-right py-2">주문구분</th>
                       <th className="text-right py-2">주문수량</th>
                       <th className="text-right py-2">체결수량</th>
                       <th className="text-right py-2">주문가격</th>
+                      <th className="text-right py-2">접수시간</th>
                     </tr>
                   </thead>
                   <tbody className="text-white">
-                    {orderData?.executionOrder.map((order) => (
+                    {orderData?.filledOrders.map((order) => (
                       <tr key={order.id} className="border-b border-[#2b2f36]">
                         <td className="py-2">{order.id}</td>
-                        <td className="py-2">{order.stockId}</td>
                         <td className="py-2">{order.stockName}</td>
-                        <td className={`text-right py-2 ${order.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}>
-                          {order.tradingType === "buy" ? "매수" : "매도"}
+                        <td
+                          className={`text-right py-2 ${order.tradingType.toLowerCase() === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}
+                        >
+                          {order.tradingType.toLowerCase() === "buy" ? "매수" : "매도"}
                         </td>
                         <td className="text-right py-2">
-                          {Number(order.price) === 0 ? "시장가" : "지정가"}
+                          {order.orderType === "MARKET" ? "시장가" : "지정가"}
                         </td>
-                        <td className="text-right py-2">{Number(order.number).toLocaleString("ko-KR")}</td>
-                        <td className="text-right py-2">{Number(order.matchNumber).toLocaleString("ko-KR")}</td>
-                        <td className="text-right py-2">{Number(order.price) === 0 ? "-" : Number(order.price).toLocaleString("ko-KR")}</td>
+                        <td className="text-right py-2">
+                          {Number(order.quantity).toLocaleString("ko-KR")}
+                        </td>
+                        <td className="text-right py-2">
+                          {Number(order.filledQuantity).toLocaleString("ko-KR")}
+                        </td>
+                        <td className="text-right py-2">
+                          {order.orderType === "MARKET"
+                            ? "-"
+                            : Number(order.price).toLocaleString("ko-KR")}
+                        </td>
+                        <td className="text-right py-2 text-zinc-400">
+                          {order.createdAt
+                            ? new Date(order.createdAt).toLocaleTimeString(
+                                "ko-KR",
+                              )
+                            : "-"}
+                        </td>
                       </tr>
                     ))}
-                    {(!orderData || orderData.executionOrder.length === 0) && (
+                    {(!orderData || orderData.filledOrders.length === 0) && (
                       <tr>
-                        <td colSpan={8} className="py-4 text-center text-zinc-500">
+                        <td
+                          colSpan={8}
+                          className="py-4 text-center text-zinc-500"
+                        >
                           체결 내역이 없습니다
                         </td>
                       </tr>
@@ -322,6 +403,7 @@ export function TradingPage() {
                   </tbody>
                 </table>
               )}
+
               {accountTab === "미체결" && (
                 <table className="w-full text-xs">
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
@@ -333,38 +415,58 @@ export function TradingPage() {
                       <th className="text-right py-2">주문수량</th>
                       <th className="text-right py-2">주문가격</th>
                       <th className="text-right py-2">미체결</th>
+                      <th className="text-right py-2">접수시간</th>
                     </tr>
                   </thead>
                   <tbody className="text-white">
-                    {orderData?.noExecutionOrder.map((order) => {
+                    {orderData?.openOrders.map((order) => {
                       const isSelected = selectedOrder?.id === order.id;
                       return (
                         <tr
                           key={order.id}
-                          onClick={() => {
-                            setSelectedOrder(order);
-                            setAmendPrice(order.price);
-                            setOrderType("정정");
-                          }}
+                          onClick={() => selectOrder(order)}
                           className={`border-b border-[#2b2f36] cursor-pointer transition-colors ${isSelected ? "bg-[#2b2f36]" : "hover:bg-[#1f2230]"}`}
                         >
                           <td className="py-2">{order.id}</td>
                           <td className="py-2">{order.stockName}</td>
-                          <td className={`text-right py-2 ${order.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}>
-                            {order.tradingType === "buy" ? "매수" : "매도"}
+                          <td
+                            className={`text-right py-2 ${order.tradingType.toLowerCase() === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}
+                          >
+                            {order.tradingType.toLowerCase() === "buy" ? "매수" : "매도"}
                           </td>
                           <td className="text-right py-2">
-                            {Number(order.price) === 0 ? "시장가" : "지정가"}
+                            {order.orderType === "MARKET" ? "시장가" : "지정가"}
                           </td>
-                          <td className="text-right py-2">{Number(order.number).toLocaleString("ko-KR")}</td>
-                          <td className="text-right py-2">{Number(order.price) === 0 ? "-" : Number(order.price).toLocaleString("ko-KR")}</td>
-                          <td className="text-right py-2">{(Number(order.number) - Number(order.matchNumber)).toLocaleString("ko-KR")}</td>
+                          <td className="text-right py-2">
+                            {Number(order.quantity).toLocaleString("ko-KR")}
+                          </td>
+                          <td className="text-right py-2">
+                            {order.orderType === "MARKET"
+                              ? "-"
+                              : Number(order.price).toLocaleString("ko-KR")}
+                          </td>
+                          <td className="text-right py-2">
+                            {(
+                              Number(order.quantity) - Number(order.filledQuantity)
+                            ).toLocaleString("ko-KR")}
+                          </td>
+                          <td className="text-right py-2 text-zinc-400">
+                            {order.createdAt
+                              ? new Date(order.createdAt).toLocaleTimeString(
+                                  "ko-KR",
+                                )
+                              : "-"}
+                          </td>
                         </tr>
                       );
                     })}
-                    {(!orderData || orderData.noExecutionOrder.length === 0) && (
+                    {(!orderData ||
+                      orderData.openOrders.length === 0) && (
                       <tr>
-                        <td colSpan={7} className="py-4 text-center text-zinc-500">
+                        <td
+                          colSpan={8}
+                          className="py-4 text-center text-zinc-500"
+                        >
                           미체결 내역이 없습니다
                         </td>
                       </tr>
@@ -375,143 +477,199 @@ export function TradingPage() {
             </div>
           </div>
         </div>
+
+        {/* 중: 호가창 */}
         <div className="w-[30%] p-2">
           <OrderBook stockId={stockId} />
         </div>
+
+        {/* 우: 주문 + 등락률 */}
         <div className="w-[20%] flex flex-col p-2 gap-2">
-          {/* 주문 창 */}
           <div className="h-[55%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
-            {/* 매수/매도/정정/취소 탭 */}
             <div className="flex items-center gap-3 mb-4 shrink-0 border-b border-[#2b2f36] pb-3">
-              <button onClick={() => setOrderType("매수")} className={`text-sm ${orderType === "매수" ? "text-[#f6465d] font-bold" : "text-zinc-400"}`}>매수</button>
-              <button onClick={() => setOrderType("매도")} className={`text-sm ${orderType === "매도" ? "text-[#2563eb] font-bold" : "text-zinc-400"}`}>매도</button>
+              <button
+                onClick={() => setOrderType("매수")}
+                className={`text-sm ${orderType === "매수" ? "text-[#f6465d] font-bold" : "text-zinc-400"}`}
+              >
+                매수
+              </button>
+              <button
+                onClick={() => setOrderType("매도")}
+                className={`text-sm ${orderType === "매도" ? "text-[#2563eb] font-bold" : "text-zinc-400"}`}
+              >
+                매도
+              </button>
               <div className="w-px h-3 bg-[#2b2f36]" />
-              <button onClick={() => setOrderType("정정")} className={`text-sm ${orderType === "정정" ? "text-[#F59E0B] font-bold" : "text-zinc-400"}`}>정정</button>
-              <button onClick={() => setOrderType("취소")} className={`text-sm ${orderType === "취소" ? "text-zinc-300 font-bold" : "text-zinc-400"}`}>취소</button>
+              <button
+                onClick={() => setOrderType("정정")}
+                className={`text-sm ${orderType === "정정" ? "text-[#F59E0B] font-bold" : "text-zinc-400"}`}
+              >
+                정정
+              </button>
+              <button
+                onClick={() => setOrderType("취소")}
+                className={`text-sm ${orderType === "취소" ? "text-zinc-300 font-bold" : "text-zinc-400"}`}
+              >
+                취소
+              </button>
             </div>
 
-            {/* 주문 폼 */}
             <div className="flex flex-col gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0">
+              {(orderType === "매수" || orderType === "매도") && (
+                <>
+                  <div>
+                    <label className="text-xs text-zinc-500 mb-1 block">
+                      주문계좌
+                    </label>
+                    <select
+                      value={selectedAccount?.id ?? ""}
+                      onChange={(e) => {
+                        const account = accounts.find(
+                          (a) => a.id === Number(e.target.value),
+                        );
+                        if (account) setSelectedAccount(account);
+                      }}
+                      className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
+                    >
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.accountNumber}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* ── 매수/매도 폼 ── */}
-              {(orderType === "매수" || orderType === "매도") && (<>
-              {/* 주문계좌 */}
-              <div>
-                <label className="text-xs text-zinc-500 mb-1 block">주문계좌</label>
-                <select
-                  value={selectedAccount?.id ?? ""}
-                  onChange={(e) => {
-                    const account = accounts.find((a) => a.id === Number(e.target.value));
-                    if (account) setSelectedAccount(account);
-                  }}
-                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
-                >
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>{account.accountNumber}</option>
-                  ))}
-                </select>
-              </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 mb-1 block">
+                      주문유형
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setPriceType("지정가")}
+                        className={`flex-1 py-2 text-xs rounded-lg ${priceType === "지정가" ? "bg-[#2b2f36] text-white border border-[#3b3f46]" : "bg-transparent text-zinc-400 border border-[#2b2f36]"}`}
+                      >
+                        지정가
+                      </button>
+                      <button
+                        onClick={() => setPriceType("시장가")}
+                        className={`flex-1 py-2 text-xs rounded-lg ${priceType === "시장가" ? "bg-[#2b2f36] text-white border border-[#3b3f46]" : "bg-transparent text-zinc-400 border border-[#2b2f36]"}`}
+                      >
+                        시장가
+                      </button>
+                    </div>
+                  </div>
 
-              {/* 주문유형 */}
-              <div>
-                <label className="text-xs text-zinc-500 mb-1 block">주문유형</label>
-                <div className="flex gap-2">
-                  <button onClick={() => setPriceType("지정가")} className={`flex-1 py-2 text-xs rounded-lg ${priceType === "지정가" ? "bg-[#2b2f36] text-white border border-[#3b3f46]" : "bg-transparent text-zinc-400 border border-[#2b2f36]"}`}>지정가</button>
-                  <button onClick={() => setPriceType("시장가")} className={`flex-1 py-2 text-xs rounded-lg ${priceType === "시장가" ? "bg-[#2b2f36] text-white border border-[#3b3f46]" : "bg-transparent text-zinc-400 border border-[#2b2f36]"}`}>시장가</button>
-                </div>
-              </div>
+                  {priceType === "지정가" && (
+                    <div>
+                      <label className="text-xs text-zinc-500 mb-1 block">
+                        가격
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value)}
+                        className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
+                      />
+                    </div>
+                  )}
 
-              {/* 가격 */}
-              {priceType === "지정가" && (
-                <div>
-                  <label className="text-xs text-zinc-500 mb-1 block">가격</label>
-                  <input type="number" placeholder="0" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none" />
-                </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 mb-1 block">
+                      수량
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-1">
+                    {[10, 25, 50, 100].map((pct) => (
+                      <button
+                        key={pct}
+                        onClick={() => {
+                          const orderPrice =
+                            priceType === "지정가"
+                              ? parseInt(price)
+                              : parseFloat(data?.stockInfo?.upperLimit ?? "0");
+                          if (orderType === "매수") {
+                            const balance = accountData?.account?.balance ?? "0";
+                            if (orderPrice > 0)
+                              setQuantity(
+                                String(
+                                  BigInt(balance) * BigInt(pct) / 100n / BigInt(orderPrice),
+                                ),
+                              );
+                          } else {
+                            const holding = accountData?.holdings?.find(
+                              (s) => s.stock.id === stockId,
+                            );
+                            const canSell = parseInt(holding?.availableQuantity ?? "0");
+                            setQuantity(
+                              String(Math.floor((canSell * pct) / 100)),
+                            );
+                          }
+                        }}
+                        className="flex-1 py-1 text-[10px] rounded bg-[#2b2f36] text-zinc-400 hover:text-white"
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleOrder}
+                    disabled={orderLoading}
+                    className={`py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"}`}
+                  >
+                    {orderLoading ? "처리중..." : orderType}
+                  </button>
+                </>
               )}
 
-              {/* 수량 */}
-              <div>
-                <label className="text-xs text-zinc-500 mb-1 block">수량</label>
-                <input type="number" placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none" />
-              </div>
-
-              {/* 퍼센트 수량 선택 */}
-              <div className="flex gap-1">
-                {[10, 25, 50, 100].map((pct) => (
-                  <button
-                    key={pct}
-                    onClick={() => {
-                      const orderPrice =
-                        priceType === "지정가"
-                          ? parseInt(price)
-                          : data?.stockInfo?.upperLimit
-                            ? parseFloat(data.stockInfo.upperLimit)
-                            : 0;
-
-                      if (orderType === "매수") {
-                        const availableMoney = accountData?.account?.money
-                          ? parseFloat(accountData.account.money)
-                          : 0;
-                        if (orderPrice > 0) {
-                          const qty = Math.floor(
-                            (availableMoney * pct) / 100 / orderPrice,
-                          );
-                          setQuantity(String(qty));
-                        }
-                      } else {
-                        const holding = accountData?.userStock?.find(
-                          (s) => s.stocks.id === stockId,
-                        );
-                        const canSell = holding?.canNumber
-                          ? parseInt(holding.canNumber)
-                          : 0;
-                        const qty = Math.floor((canSell * pct) / 100);
-                        setQuantity(String(qty));
-                      }
-                    }}
-                    className="flex-1 py-1 text-[10px] rounded bg-[#2b2f36] text-zinc-400 hover:text-white"
-                  >
-                    {pct}%
-                  </button>
-                ))}
-              </div>
-
-              {/* 주문 버튼 */}
-              <button
-                onClick={handleOrder}
-                disabled={orderLoading}
-                className={`py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${
-                  orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"
-                }`}
-              >
-                {orderLoading ? "처리중..." : orderType}
-              </button>
-            </>)}
-
-            {/* ── 정정 폼 ── */}
-            {orderType === "정정" && (
-              <>
-                {selectedOrder ? (
+              {orderType === "정정" &&
+                (selectedOrder ? (
                   <>
-                    <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex flex-col gap-1">
-                      <span className="text-zinc-400">주문 #{selectedOrder.id}</span>
+                    <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex flex-col gap-1.5">
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">주문 ID</span>
+                        <span className="text-white">#{selectedOrder.id}</span>
+                      </div>
                       <div className="flex justify-between">
                         <span className="text-zinc-400">종목</span>
-                        <span className="text-white">{selectedOrder.stockName}</span>
+                        <span className="text-white">
+                          {selectedOrder.stockName}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-zinc-400">유형</span>
-                        <span className={selectedOrder.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}>
-                          {selectedOrder.tradingType === "buy" ? "매수" : "매도"}
+                        <span
+                          className={
+                            selectedOrder.tradingType === "buy"
+                              ? "text-[#f6465d]"
+                              : "text-[#2563eb]"
+                          }
+                        >
+                          {selectedOrder.tradingType === "buy"
+                            ? "매수"
+                            : "매도"}
                         </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-zinc-400">현재 가격</span>
-                        <span className="text-white">{Number(selectedOrder.price).toLocaleString("ko-KR")}</span>
+                        <span className="text-white">
+                          {Number(selectedOrder.price).toLocaleString("ko-KR")}
+                        </span>
                       </div>
                     </div>
                     <div>
-                      <label className="text-xs text-zinc-500 mb-1 block">정정 가격</label>
+                      <label className="text-xs text-zinc-500 mb-1 block">
+                        정정 가격
+                      </label>
                       <input
                         type="number"
                         placeholder="0"
@@ -523,62 +681,82 @@ export function TradingPage() {
                     <button
                       onClick={handleAmend}
                       disabled={amendLoading}
-                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#F59E0B] text-gray-900"
+                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#F59E0B] text-gray-900 shrink-0"
                     >
                       {amendLoading ? "처리중..." : "정정 확인"}
                     </button>
                   </>
                 ) : (
-                  <p className="text-xs text-zinc-500 text-center py-6">미체결 탭에서 주문을 선택하세요</p>
-                )}
-              </>
-            )}
+                  <p className="text-xs text-zinc-500 text-center py-6">
+                    미체결 탭에서 주문을 선택하세요
+                  </p>
+                ))}
 
-            {/* ── 취소 폼 ── */}
-            {orderType === "취소" && (
-              <>
-                {selectedOrder ? (
+              {orderType === "취소" &&
+                (selectedOrder ? (
                   <>
-                    <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex flex-col gap-1">
-                      <span className="text-zinc-400">주문 #{selectedOrder.id}</span>
+                    <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex flex-col gap-1.5">
+                      <div className="flex justify-between">
+                        <span className="text-zinc-400">주문 ID</span>
+                        <span className="text-white">#{selectedOrder.id}</span>
+                      </div>
                       <div className="flex justify-between">
                         <span className="text-zinc-400">종목</span>
-                        <span className="text-white">{selectedOrder.stockName}</span>
+                        <span className="text-white">
+                          {selectedOrder.stockName}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-zinc-400">유형</span>
-                        <span className={selectedOrder.tradingType === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}>
-                          {selectedOrder.tradingType === "buy" ? "매수" : "매도"}
+                        <span
+                          className={
+                            selectedOrder.tradingType === "buy"
+                              ? "text-[#f6465d]"
+                              : "text-[#2563eb]"
+                          }
+                        >
+                          {selectedOrder.tradingType === "buy"
+                            ? "매수"
+                            : "매도"}
                         </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-zinc-400">수량</span>
-                        <span className="text-white">{Number(selectedOrder.number).toLocaleString("ko-KR")}주</span>
+                        <span className="text-white">
+                          {Number(selectedOrder.quantity).toLocaleString("ko-KR")}
+                          주
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-zinc-400">가격</span>
-                        <span className="text-white">{Number(selectedOrder.price) === 0 ? "시장가" : Number(selectedOrder.price).toLocaleString("ko-KR")}</span>
+                        <span className="text-white">
+                          {Number(selectedOrder.price) === 0
+                            ? "시장가"
+                            : Number(selectedOrder.price).toLocaleString(
+                                "ko-KR",
+                              )}
+                        </span>
                       </div>
                     </div>
                     <button
                       onClick={handleCancel}
                       disabled={cancelLoading}
-                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-transparent border border-[#f6465d] text-[#f6465d] hover:bg-[#f6465d]/10"
+                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-transparent border border-[#f6465d] text-[#f6465d] hover:bg-[#f6465d]/10 shrink-0"
                     >
                       {cancelLoading ? "처리중..." : "주문 취소 확인"}
                     </button>
                   </>
                 ) : (
-                  <p className="text-xs text-zinc-500 text-center py-6">미체결 탭에서 주문을 선택하세요</p>
-                )}
-              </>
-            )}
+                  <p className="text-xs text-zinc-500 text-center py-6">
+                    미체결 탭에서 주문을 선택하세요
+                  </p>
+                ))}
             </div>
           </div>
-          {/* 등락률 순위 */}
+
           <div className="h-[45%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
             <div className="text-sm text-zinc-400 mb-3">실시간 등락률</div>
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto scrollbar-thin">
               <table className="w-full text-xs">
                 <thead className="text-zinc-500 border-b border-[#2b2f36]">
                   <tr>
@@ -593,21 +771,35 @@ export function TradingPage() {
                     .sort((a, b) => parseFloat(b.per) - parseFloat(a.per))
                     .map((stock, i) => {
                       const per = parseFloat(stock.per);
-                      const perColor = per > 0 ? "text-[#f6465d]" : per < 0 ? "text-[#2563eb]" : "text-white";
+                      const color =
+                        per > 0
+                          ? "text-[#f6465d]"
+                          : per < 0
+                            ? "text-[#2563eb]"
+                            : "text-white";
                       return (
-                        <tr key={stock.id} className="border-b border-[#2b2f36]">
+                        <tr
+                          key={stock.id}
+                          className="border-b border-[#2b2f36]"
+                        >
                           <td className="py-1.5">{i + 1}</td>
                           <td className="py-1.5">{stock.name}</td>
-                          <td className="text-right py-1.5">{Number(stock.price).toLocaleString("ko-KR")}</td>
-                          <td className={`text-right py-1.5 ${perColor}`}>
-                            {per > 0 ? "+" : ""}{per.toFixed(2)}%
+                          <td className="text-right py-1.5">
+                            {Number(stock.price).toLocaleString("ko-KR")}
+                          </td>
+                          <td className={`text-right py-1.5 ${color}`}>
+                            {per > 0 ? "+" : ""}
+                            {per.toFixed(2)}%
                           </td>
                         </tr>
                       );
                     })}
                   {stocks.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="py-4 text-center text-zinc-500">
+                      <td
+                        colSpan={4}
+                        className="py-4 text-center text-zinc-500"
+                      >
                         종목 데이터 없음
                       </td>
                     </tr>
@@ -619,14 +811,157 @@ export function TradingPage() {
         </div>
       </div>
 
-      {/* 토스트 알림 */}
+      {/* 송금 플로팅 버튼 */}
+      <button
+        onClick={() => setShowTransfer(true)}
+        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 bg-[#F59E0B] hover:bg-[#D97706] text-gray-900 font-bold text-sm rounded-full shadow-lg transition-colors"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 2v20M2 12h20" />
+        </svg>
+        송금
+      </button>
+
+      {/* 송금 모달 */}
+      {showTransfer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setShowTransfer(false)}
+          />
+          <div className="relative bg-[#181a20] rounded-2xl p-6 w-80 border border-[#2b2f36] shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <span className="text-white font-bold text-base">송금</span>
+              <button
+                onClick={() => setShowTransfer(false)}
+                className="text-zinc-500 hover:text-white transition-colors"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                >
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="text-xs text-zinc-500 mb-1.5 block">
+                  보내는 계좌
+                </label>
+                <select
+                  value={selectedAccount?.id ?? ""}
+                  onChange={(e) => {
+                    const account = accounts.find(
+                      (a) => a.id === Number(e.target.value),
+                    );
+                    if (account) setSelectedAccount(account);
+                  }}
+                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2.5 rounded-lg border border-[#3b3f46] outline-none"
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.accountNumber}
+                    </option>
+                  ))}
+                </select>
+                {accountData && (
+                  <p className="text-[10px] text-zinc-500 mt-1 px-1">
+                    사용 가능:{" "}
+                    <span className="text-[#0ecb81]">
+                      {fmtWon(accountData.account.availableBalance)}{" "}
+                      KRW
+                    </span>
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-500 mb-1.5 block">
+                  받는 계좌번호
+                </label>
+                <input
+                  type="number"
+                  placeholder="계좌번호 입력"
+                  value={transferTo}
+                  onChange={(e) => setTransferTo(e.target.value)}
+                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2.5 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-500 mb-1.5 block">
+                  금액
+                </label>
+                <input
+                  type="number"
+                  placeholder="0"
+                  value={transferAmount}
+                  onChange={(e) => setTransferAmount(e.target.value)}
+                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2.5 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B]"
+                />
+                <div className="flex gap-1 mt-2">
+                  {[10000, 50000, 100000].map((amt) => (
+                    <button
+                      key={amt}
+                      onClick={() =>
+                        setTransferAmount((prev) =>
+                          String((parseInt(prev) || 0) + amt),
+                        )
+                      }
+                      className="flex-1 py-1.5 text-[10px] rounded bg-[#2b2f36] text-zinc-400 hover:text-white transition-colors"
+                    >
+                      +{(amt / 10000).toLocaleString("ko-KR")}만
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setTransferAmount("")}
+                    className="px-2 py-1.5 text-[10px] rounded bg-[#2b2f36] text-zinc-400 hover:text-white transition-colors"
+                  >
+                    초기화
+                  </button>
+                </div>
+              </div>
+
+              {transferAmount && parseInt(transferAmount) > 0 && (
+                <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex justify-between">
+                  <span className="text-zinc-400">송금 금액</span>
+                  <span className="text-white font-semibold">
+                    {parseInt(transferAmount).toLocaleString("ko-KR")} KRW
+                  </span>
+                </div>
+              )}
+
+              <button
+                onClick={handleTransfer}
+                disabled={transferLoading}
+                className="w-full py-3 rounded-lg text-sm font-bold bg-[#F59E0B] hover:bg-[#D97706] text-gray-900 disabled:opacity-50 transition-colors"
+              >
+                {transferLoading ? "처리중..." : "송금하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium shadow-lg z-50 transition-all ${
-            toast.type === "success"
-              ? "bg-[#0ecb81] text-black"
-              : "bg-[#f6465d] text-white"
-          }`}
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium shadow-lg z-50 ${toast.type === "success" ? "bg-[#0ecb81] text-black" : "bg-[#f6465d] text-white"}`}
         >
           {toast.message}
         </div>

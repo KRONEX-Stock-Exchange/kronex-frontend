@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { WS_BASE_URL } from "../constants";
+import { REALTIME_URL } from "../constants";
 import { tokenManager } from "../services/auth/tokenManager";
 
 export interface OrderbookItem {
   price: string;
-  number: string;
+  quantity: string;
 }
 
 export interface StockInfo {
   id: number;
   name: string;
   price: string;
-  previousClose: string;
+  prevClose: string;
   low: string;
   high: string;
   close: string;
@@ -22,22 +22,28 @@ export interface StockInfo {
 }
 
 export interface OrderbookData {
-  stockInfo: StockInfo;
+  stockInfo: StockInfo | null;
   buyOrderbookData: OrderbookItem[];
   sellOrderbookData: OrderbookItem[];
-  match: { price: string; number: string; type: string }[];
+  match: { price: string; quantity: string; type: string }[];
 }
 
-export function useOrderbook(stockId: number) {
-  const [data, setData] = useState<OrderbookData | null>(null);
+export function useOrderbook(stockId: number | null) {
+  const [data, setData] = useState<OrderbookData>({
+    stockInfo: null,
+    buyOrderbookData: [],
+    sellOrderbookData: [],
+    match: [],
+  });
   const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
+    if (stockId === null) return;
     let active = true;
 
     const connect = () => {
-      const newSocket = io(`${WS_BASE_URL}/stock`, {
+      const newSocket = io(`${REALTIME_URL}/stock`, {
         transports: ["websocket"],
         auth: { token: tokenManager.getToken() },
       });
@@ -46,12 +52,16 @@ export function useOrderbook(stockId: number) {
         newSocket.emit("joinStockRoom", stockId);
       });
 
-      newSocket.on("stockUpdated", (receivedData: OrderbookData) => {
-        setData(receivedData);
+      newSocket.on("stockInfoUpdated", (info: StockInfo) => {
+        setData((prev) => ({ ...prev, stockInfo: info }));
       });
 
-      newSocket.on("disconnect", () => {
-        console.log("WebSocket disconnected");
+      newSocket.on("orderBookUpdated", ({ buyOrderbook, sellOrderbook }: { buyOrderbook: OrderbookItem[]; sellOrderbook: OrderbookItem[] }) => {
+        setData((prev) => ({ ...prev, buyOrderbookData: buyOrderbook, sellOrderbookData: sellOrderbook }));
+      });
+
+      newSocket.on("matchedListUpdated", (matched: { price: string; quantity: string; type: string }[]) => {
+        setData((prev) => ({ ...prev, match: matched }));
       });
 
       newSocket.on("errorCustom", async ({ message }: { message: string }) => {

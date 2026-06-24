@@ -1,4 +1,4 @@
-import { WS_BASE_URL } from '../../constants';
+import { REALTIME_URL } from '../../constants';
 import type { WSMessage } from '../../types';
 
 type MessageHandler = (data: unknown) => void;
@@ -91,4 +91,4 @@ class WebSocketClient {
   }
 }
 
-export const wsClient = new WebSocketClient(WS_BASE_URL);
+export const wsClient = new WebSocketClient(REALTIME_URL);

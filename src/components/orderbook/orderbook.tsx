@@ -3,16 +3,21 @@ import { useOrderbook } from "../../hooks/useOrderbook";
 import type { StockInfo, OrderbookItem } from "../../hooks/useOrderbook";
 import { Tick, EmptyTick } from "./tick";
 
+const toNum = (s: string | undefined | null) => {
+  const n = parseFloat(s ?? "");
+  return isNaN(n) ? 0 : n;
+};
+
 const MAX_TICKS = 10; // 호가창 최대 행 수
 
 interface OrderBookProps {
-  stockId?: number;
+  stockId: number | null;
 }
 
 // 체결 현황 컴포넌트
 interface MatchItem {
   price: string;
-  number: string;
+  quantity: string;
   type: string;
 }
 
@@ -30,7 +35,7 @@ function MatchHistory({
   };
 
   const getNumberColor = (type: string) => {
-    return type === "buy" ? "text-[#f6465d]" : "text-[#2563eb]";
+    return type?.toLowerCase() === "buy" ? "text-[#f6465d]" : "text-[#2563eb]";
   };
 
   return (
@@ -40,8 +45,8 @@ function MatchHistory({
       </div>
       <div className="flex-1 overflow-y-auto">
         {matches.slice(0, 50).map((match, i) => {
-          const priceNum = parseFloat(match.price);
-          const numberNum = parseFloat(match.number);
+          const priceNum = toNum(match.price);
+          const numberNum = toNum(match.quantity);
           return (
             <div key={i} className="flex justify-between text-xs py-0.5">
               <span className={getPriceColor(priceNum)}>
@@ -62,9 +67,9 @@ function MatchHistory({
 function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
   if (!stockInfo) return null;
 
-  const prev = parseFloat(stockInfo.previousClose);
+  const prev = toNum(stockInfo.prevClose);
   const getPercent = (val: string) => {
-    const v = parseFloat(val);
+    const v = toNum(val);
     return prev > 0 ? ((v - prev) / prev) * 100 : 0;
   };
   const getColor = (pct: number) => {
@@ -74,7 +79,7 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
   };
 
   const items = [
-    { label: "전일종가", value: stockInfo.previousClose, showPercent: false },
+    { label: "전일종가", value: stockInfo.prevClose, showPercent: false },
     { label: "시가", value: stockInfo.open, showPercent: false },
     { label: "고가", value: stockInfo.high, showPercent: true },
     { label: "저가", value: stockInfo.low, showPercent: true },
@@ -101,7 +106,7 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
                 </span>
               )}
               <span className={item.showPercent ? color : "text-white"}>
-                {parseFloat(item.value).toLocaleString()}
+                {toNum(item.value).toLocaleString()}
               </span>
             </span>
           </div>
@@ -111,7 +116,7 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
   );
 }
 
-export function OrderBook({ stockId = 1 }: OrderBookProps) {
+export function OrderBook({ stockId }: OrderBookProps) {
   const { data } = useOrderbook(stockId);
   const prevSellRef = useRef<OrderbookItem[]>([]);
   const prevBuyRef = useRef<OrderbookItem[]>([]);
@@ -128,17 +133,17 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
 
     if (prevSellRef.current.length > 0 || prevBuyRef.current.length > 0) {
       const prevSellMap = new Map(
-        prevSellRef.current.map((o) => [o.price, parseFloat(o.number)]),
+        prevSellRef.current.map((o) => [o.price, toNum(o.quantity)]),
       );
       const prevBuyMap = new Map(
-        prevBuyRef.current.map((o) => [o.price, parseFloat(o.number)]),
+        prevBuyRef.current.map((o) => [o.price, toNum(o.quantity)]),
       );
 
       // 매도 diff 병합
       for (const order of sellOrders) {
         const prev = prevSellMap.get(order.price);
         if (prev !== undefined) {
-          const diff = parseFloat(order.number) - prev;
+          const diff = toNum(order.quantity) - prev;
           if (diff !== 0) {
             const key = `sell_${order.price}`;
             // 기존 타이머 제거
@@ -171,7 +176,7 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
       for (const order of buyOrders) {
         const prev = prevBuyMap.get(order.price);
         if (prev !== undefined) {
-          const diff = parseFloat(order.number) - prev;
+          const diff = toNum(order.quantity) - prev;
           if (diff !== 0) {
             const key = `buy_${order.price}`;
             if (diffTimersRef.current.has(key)) {
@@ -212,22 +217,14 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
   }, []);
 
   // 현재가 (stockInfo.price 기준)
-  const basePrice = data?.stockInfo?.price
-    ? parseFloat(data.stockInfo.price)
-    : 9500;
+  const basePrice = toNum(data?.stockInfo?.price) || 9500;
 
   // 전일종가
-  const previousClose = data?.stockInfo?.previousClose
-    ? parseFloat(data.stockInfo.previousClose)
-    : basePrice;
+  const previousClose = toNum(data?.stockInfo?.prevClose) || basePrice;
 
-  // 고가/저가
-  const highPrice = data?.stockInfo?.high
-    ? parseFloat(data.stockInfo.high)
-    : undefined;
-  const lowPrice = data?.stockInfo?.low
-    ? parseFloat(data.stockInfo.low)
-    : undefined;
+  // 고가/저가 (0이면 undefined로 처리해 하이라이트 비활성화)
+  const highPrice = toNum(data?.stockInfo?.high) || undefined;
+  const lowPrice = toNum(data?.stockInfo?.low) || undefined;
 
   // 매도/매수 데이터
   const sellOrders = data?.sellOrderbookData || [];
@@ -235,24 +232,24 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
 
   // 최대 수량 계산 (바 너비용)
   const allNumbers = [
-    ...sellOrders.map((o) => parseFloat(o.number)),
-    ...buyOrders.map((o) => parseFloat(o.number)),
+    ...sellOrders.map((o) => toNum(o.quantity)),
+    ...buyOrders.map((o) => toNum(o.quantity)),
   ];
   const maxNumber = Math.max(...allNumbers, 1);
 
   // 매도는 가격 높은 순으로 정렬 (높은 가격이 위)
   const sortedSellOrders = [...sellOrders]
-    .sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    .sort((a, b) => toNum(b.price) - toNum(a.price))
     .slice(0, MAX_TICKS);
 
   // 매수는 가격 높은 순으로 정렬 (높은 가격이 위)
   const sortedBuyOrders = [...buyOrders]
-    .sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+    .sort((a, b) => toNum(b.price) - toNum(a.price))
     .slice(0, MAX_TICKS);
 
   // 총 잔량
-  const sellTotal = sellOrders.reduce((sum, o) => sum + parseFloat(o.number), 0);
-  const buyTotal = buyOrders.reduce((sum, o) => sum + parseFloat(o.number), 0);
+  const sellTotal = sellOrders.reduce((sum, o) => sum + toNum(o.quantity), 0);
+  const buyTotal = buyOrders.reduce((sum, o) => sum + toNum(o.quantity), 0);
 
   // 빈 틱 채우기
   const emptySellCount = MAX_TICKS - sortedSellOrders.length;
@@ -269,11 +266,7 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
       <div className="absolute left-0 bottom-[4%] w-[38%] h-[48%]">
         <MatchHistory
           matches={data?.match || []}
-          previousClose={
-            data?.stockInfo?.previousClose
-              ? parseFloat(data.stockInfo.previousClose)
-              : basePrice
-          }
+          previousClose={toNum(data?.stockInfo?.prevClose) || basePrice}
         />
       </div>
 
@@ -289,7 +282,7 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
             key={`sell-${i}`}
             type="sell"
             price={order.price}
-            number={order.number}
+            number={order.quantity}
             basePrice={basePrice}
             previousClose={previousClose}
             maxNumber={maxNumber}
@@ -307,7 +300,7 @@ export function OrderBook({ stockId = 1 }: OrderBookProps) {
             key={`buy-${i}`}
             type="buy"
             price={order.price}
-            number={order.number}
+            number={order.quantity}
             basePrice={basePrice}
             previousClose={previousClose}
             maxNumber={maxNumber}

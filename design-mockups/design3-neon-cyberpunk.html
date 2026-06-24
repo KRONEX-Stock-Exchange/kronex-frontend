@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design 3 — Neon Cyberpunk</title>
+<style>
+  * { margin:0;padding:0;box-sizing:border-box; }
+  body { background:#08080f; color:#ccc; font-family:'Segoe UI',sans-serif; font-size:12px; height:100vh; overflow:hidden; }
+
+  .header {
+    height:52px; background:rgba(255,255,255,0.03); backdrop-filter:blur(10px);
+    border-bottom:1px solid rgba(255,45,135,0.3); display:flex; align-items:center;
+    padding:0 20px; gap:20px;
+    box-shadow: 0 1px 20px rgba(255,45,135,0.15);
+  }
+  .logo { font-size:18px; font-weight:700; letter-spacing:3px; background:linear-gradient(90deg,#ff2d87,#a855f7); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .sep { width:1px; height:22px; background:rgba(255,45,135,0.3); }
+  .sym { font-size:14px; font-weight:600; color:#f0f0f0; }
+  .price-h { font-size:20px; font-weight:700; color:#00ffe7; text-shadow:0 0 12px rgba(0,255,231,0.5); }
+  .chg { color:#00ffe7; font-size:12px; }
+  .stat-g { display:flex; flex-direction:column; }
+  .stat-l { font-size:9px; color:rgba(255,255,255,0.3); }
+  .stat-v { font-size:11px; }
+  .red { color:#ff2d87; }
+  .cyan { color:#00ffe7; }
+  .grn { color:#39ff14; }
+
+  .main { display:flex; height:calc(100vh - 52px); gap:8px; padding:8px; }
+
+  /* 글래스 카드 기본 */
+  .glass { background:rgba(255,255,255,0.04); backdrop-filter:blur(12px); border-radius:8px; overflow:hidden; }
+  .glass-pink { border:1px solid rgba(255,45,135,0.25); box-shadow:0 0 20px rgba(255,45,135,0.08); }
+  .glass-cyan { border:1px solid rgba(0,255,231,0.25); box-shadow:0 0 20px rgba(0,255,231,0.08); }
+  .glass-purple { border:1px solid rgba(168,85,247,0.25); box-shadow:0 0 20px rgba(168,85,247,0.08); }
+
+  /* 호가창 */
+  .ob-col { width:250px; display:flex; flex-direction:column; }
+  .ob-title { padding:8px 12px; font-size:10px; color:rgba(255,45,135,0.8); letter-spacing:2px; border-bottom:1px solid rgba(255,45,135,0.15); }
+  .ob-body { flex:1; position:relative; overflow:hidden; }
+  .ob-sell, .ob-buy { height:48%; }
+  .ob-total { height:4%; display:flex; align-items:center; border-top:1px solid rgba(255,45,135,0.15); font-size:9px; }
+  .ob-total-sell { width:23%; display:flex; justify-content:flex-end; padding-right:6px; color:#a855f7; }
+  .ob-total-gap { width:15%; }
+  .ob-total-label { width:24%; text-align:center; color:rgba(255,255,255,0.3); font-size:8px; letter-spacing:1px; }
+  .ob-total-gap2 { width:15%; }
+  .ob-total-buy { width:23%; padding-left:6px; color:#39ff14; }
+
+  .tick { display:flex; height:10%; align-items:stretch; }
+  .t-num { width:23%; display:flex; align-items:center; justify-content:flex-end; padding-right:5px; position:relative; background:transparent; font-size:10px; }
+  .t-bar-s { position:absolute; right:0; top:5%; height:90%; background:rgba(168,85,247,0.2); }
+  .t-bar-b { position:absolute; left:0; top:5%; height:90%; background:rgba(57,255,20,0.15); }
+  .t-chg { width:15%; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.2); font-size:9px; border-right:1px solid rgba(255,45,135,0.1); }
+  .t-price { width:24%; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.2); font-size:10px; font-weight:600; }
+  .t-er { width:38%; background:transparent; }
+  .t-el { width:38%; background:transparent; }
+  .t-num-b { width:23%; display:flex; align-items:center; padding-left:5px; position:relative; font-size:10px; }
+
+  .si-panel { position:absolute; right:0; top:0; width:38%; height:48%; padding:6px 8px; display:flex; flex-direction:column; justify-content:flex-end; }
+  .si-row { display:flex; justify-content:space-between; font-size:9px; border-bottom:1px solid rgba(255,45,135,0.1); padding:2.5px 0; }
+  .si-lbl { color:rgba(255,255,255,0.3); }
+  .mt-panel { position:absolute; left:0; bottom:4%; width:38%; height:48%; padding:6px 8px; overflow:hidden; }
+  .mt-title { font-size:9px; color:rgba(0,255,231,0.6); border-bottom:1px solid rgba(0,255,231,0.15); padding-bottom:3px; margin-bottom:3px; letter-spacing:1px; }
+  .mt-row { display:flex; justify-content:space-between; font-size:9px; padding:1px 0; }
+
+  /* 차트 */
+  .chart-col { flex:1; display:flex; flex-direction:column; }
+  .chart-tabs { height:34px; background:rgba(0,0,0,0.3); border-bottom:1px solid rgba(255,45,135,0.15); display:flex; align-items:center; padding:0 12px; gap:12px; }
+  .ctab { font-size:10px; color:rgba(255,255,255,0.3); cursor:pointer; }
+  .ctab.on { color:#ff2d87; text-shadow:0 0 8px #ff2d87; }
+  .chart-body { flex:1; padding:12px; position:relative; overflow:hidden; }
+  .chart-body svg { width:100%; height:100%; }
+
+  /* 주문 패널 */
+  .order-col { width:220px; display:flex; flex-direction:column; }
+  .order-top { padding:10px 12px; border-bottom:1px solid rgba(255,45,135,0.15); }
+  .order-tabs { display:flex; gap:6px; margin-bottom:10px; }
+  .otab { flex:1; padding:7px; text-align:center; font-size:11px; cursor:pointer; border-radius:4px; font-weight:600; border:1px solid transparent; }
+  .otab.buy-on { background:rgba(57,255,20,0.1); border-color:rgba(57,255,20,0.4); color:#39ff14; box-shadow:0 0 10px rgba(57,255,20,0.2); }
+  .otab.sell-off { background:rgba(255,45,135,0.05); border-color:rgba(255,45,135,0.2); color:rgba(255,45,135,0.5); }
+  .field-label { font-size:9px; color:rgba(255,255,255,0.3); margin-bottom:3px; letter-spacing:1px; }
+  .neon-input { width:100%; background:rgba(0,0,0,0.4); border:1px solid rgba(255,45,135,0.3); color:#f0f0f0; padding:7px 10px; font-size:11px; border-radius:4px; outline:none; margin-bottom:8px; }
+  .neon-input:focus { border-color:#ff2d87; box-shadow:0 0 8px rgba(255,45,135,0.3); }
+  .pct-btns { display:flex; gap:4px; margin-bottom:8px; }
+  .pct-btn { flex:1; padding:4px; font-size:9px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,45,135,0.2); color:rgba(255,255,255,0.4); cursor:pointer; border-radius:3px; text-align:center; }
+  .submit-btn { width:100%; padding:10px; background:linear-gradient(135deg,rgba(57,255,20,0.15),rgba(0,255,231,0.15)); border:1px solid rgba(57,255,20,0.5); color:#39ff14; font-weight:700; cursor:pointer; border-radius:4px; font-size:12px; letter-spacing:1px; box-shadow:0 0 15px rgba(57,255,20,0.2); }
+  .info-row { display:flex; justify-content:space-between; font-size:9px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+  .info-lbl { color:rgba(255,255,255,0.3); }
+  .info-val { color:rgba(255,255,255,0.7); }
+
+  /* 네온 글로우 현재가 */
+  .current-price-badge {
+    background:rgba(255,45,135,0.15);
+    border:1px solid rgba(255,45,135,0.5);
+    color:#ff2d87;
+    text-shadow:0 0 8px #ff2d87;
+    padding:2px 8px;
+    border-radius:3px;
+    font-size:10px;
+    font-weight:700;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">◈ STEX</div>
+  <div class="sep"></div>
+  <div class="sym">SAMSUNG <span style="color:rgba(255,45,135,0.5)">/</span> KRW</div>
+  <div class="sep"></div>
+  <div class="price-h">9,850</div>
+  <div class="chg">▲ +1.54%</div>
+  <div class="sep"></div>
+  <div class="stat-g"><span class="stat-l">HIGH</span><span class="stat-v red">10,200</span></div>
+  <div class="stat-g"><span class="stat-l">LOW</span><span class="stat-v cyan">9,600</span></div>
+  <div class="stat-g"><span class="stat-l">VOL</span><span class="stat-v" style="color:rgba(255,255,255,0.6)">3.24M</span></div>
+  <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+    <span style="font-size:9px;color:rgba(255,255,255,0.3)">잔고 <span style="color:#a855f7;text-shadow:0 0 6px #a855f7">₩4,820,000</span></span>
+    <button style="background:rgba(255,45,135,0.1);border:1px solid rgba(255,45,135,0.4);color:#ff2d87;padding:5px 14px;border-radius:4px;cursor:pointer;font-size:10px">계정</button>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- 호가창 -->
+  <div class="ob-col glass glass-pink">
+    <div class="ob-title">▸ ORDER BOOK</div>
+    <div class="ob-body" style="height:calc(100% - 33px)">
+
+      <div class="si-panel">
+        <div class="si-row"><span class="si-lbl">PREV</span><span style="color:rgba(255,255,255,0.7)">9,700</span></div>
+        <div class="si-row"><span class="si-lbl">OPEN</span><span style="color:rgba(255,255,255,0.7)">9,720</span></div>
+        <div class="si-row"><span class="si-lbl">HIGH</span><span class="red">+5.15% 10,200</span></div>
+        <div class="si-row"><span class="si-lbl">LOW</span><span class="cyan">-1.03% 9,600</span></div>
+        <div class="si-row"><span class="si-lbl">LIM+</span><span class="red">+29.9%</span></div>
+        <div class="si-row"><span class="si-lbl">LIM-</span><span class="cyan">-29.9%</span></div>
+      </div>
+
+      <div class="mt-panel">
+        <div class="mt-title">TRADES</div>
+        <div class="mt-row"><span class="red">9,870</span><span class="grn">320</span></div>
+        <div class="mt-row"><span class="red">9,860</span><span class="red">150</span></div>
+        <div class="mt-row"><span class="cyan">9,840</span><span class="red">200</span></div>
+        <div class="mt-row"><span class="red">9,855</span><span class="grn">80</span></div>
+        <div class="mt-row"><span class="cyan">9,830</span><span class="red">420</span></div>
+        <div class="mt-row"><span class="red">9,850</span><span class="grn">110</span></div>
+        <div class="mt-row"><span class="red">9,860</span><span class="grn">95</span></div>
+        <div class="mt-row"><span class="cyan">9,820</span><span class="red">280</span></div>
+        <div class="mt-row"><span class="red">9,870</span><span class="grn">60</span></div>
+        <div class="mt-row"><span class="red">9,865</span><span class="grn">145</span></div>
+        <div class="mt-row"><span class="cyan">9,835</span><span class="red">330</span></div>
+        <div class="mt-row"><span class="red">9,850</span><span class="grn">75</span></div>
+      </div>
+
+      <div class="ob-sell">
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:35%"></div><span style="z-index:1;position:relative">4,200</span></div><div class="t-chg red">+5.15%</div><div class="t-price red">10,200</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:28%"></div><span style="z-index:1;position:relative">3,100</span></div><div class="t-chg red">+4.12%</div><div class="t-price red">10,100</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:55%"></div><span style="z-index:1;position:relative">6,800</span></div><div class="t-chg red">+3.09%</div><div class="t-price red">10,000</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:42%"></div><span style="z-index:1;position:relative">5,200</span></div><div class="t-chg red">+2.06%</div><div class="t-price red">9,900</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:30%"></div><span style="z-index:1;position:relative">3,700</span></div><div class="t-chg red">+1.03%</div><div class="t-price red">9,800</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:20%"></div><span style="z-index:1;position:relative">2,500</span></div><div class="t-chg" style="color:rgba(255,255,255,0.7)">0.00%</div><div class="t-price" style="color:#fff;box-shadow:0 0 0 1px rgba(255,255,255,0.4)">9,700</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:38%"></div><span style="z-index:1;position:relative">4,700</span></div><div class="t-chg cyan">-0.52%</div><div class="t-price cyan">9,650</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:25%"></div><span style="z-index:1;position:relative">3,100</span></div><div class="t-chg cyan">-1.03%</div><div class="t-price cyan">9,600</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:18%"></div><span style="z-index:1;position:relative">2,200</span></div><div class="t-chg cyan">-1.55%</div><div class="t-price cyan">9,550</div><div class="t-er"></div></div>
+        <div class="tick"><div class="t-num"><div class="t-bar-s" style="width:60%"></div><span style="z-index:1;position:relative">7,400</span></div><div class="t-chg cyan">-2.06%</div><div class="t-price cyan">9,500</div><div class="t-er"></div></div>
+      </div>
+
+      <div class="ob-buy">
+        <div class="tick"><div class="t-el"></div><div class="t-price red" style="box-shadow:0 0 0 1px #ff2d87;text-shadow:0 0 6px #ff2d87">9,870</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.75%</div><div class="t-num-b"><div class="t-bar-b" style="width:45%"></div><span style="z-index:1;position:relative">5,500</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,860</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.65%</div><div class="t-num-b"><div class="t-bar-b" style="width:33%"></div><span style="z-index:1;position:relative">4,100</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,855</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.60%</div><div class="t-num-b"><div class="t-bar-b" style="width:70%"></div><span style="z-index:1;position:relative">8,600</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,850</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.55%</div><div class="t-num-b"><div class="t-bar-b" style="width:52%"></div><span style="z-index:1;position:relative">6,400</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,840</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.44%</div><div class="t-num-b"><div class="t-bar-b" style="width:28%"></div><span style="z-index:1;position:relative">3,400</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,830</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.34%</div><div class="t-num-b"><div class="t-bar-b" style="width:40%"></div><span style="z-index:1;position:relative">4,900</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,820</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.24%</div><div class="t-num-b"><div class="t-bar-b" style="width:22%"></div><span style="z-index:1;position:relative">2,700</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,810</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.13%</div><div class="t-num-b"><div class="t-bar-b" style="width:55%"></div><span style="z-index:1;position:relative">6,700</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,800</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+1.03%</div><div class="t-num-b"><div class="t-bar-b" style="width:37%"></div><span style="z-index:1;position:relative">4,500</span></div></div>
+        <div class="tick"><div class="t-el"></div><div class="t-price red">9,790</div><div class="t-chg red" style="border-left:1px solid rgba(255,45,135,0.2)">+0.93%</div><div class="t-num-b"><div class="t-bar-b" style="width:48%"></div><span style="z-index:1;position:relative">5,900</span></div></div>
+      </div>
+
+      <div class="ob-total">
+        <div class="ob-total-sell">43,200</div>
+        <div class="ob-total-gap"></div>
+        <div class="ob-total-label">TOTAL</div>
+        <div class="ob-total-gap2"></div>
+        <div class="ob-total-buy">52,700</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 차트 -->
+  <div class="chart-col glass glass-purple">
+    <div class="chart-tabs">
+      <span class="ctab">1m</span><span class="ctab">5m</span><span class="ctab on">15m</span>
+      <span class="ctab">1h</span><span class="ctab">1d</span>
+      <span style="margin-left:auto;font-size:9px;color:rgba(168,85,247,0.6)">CANDLE · LINE</span>
+    </div>
+    <div class="chart-body">
+      <svg viewBox="0 0 680 280" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="glow1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#a855f7" stop-opacity="0.2"/>
+            <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+          </linearGradient>
+          <filter id="neon">
+            <feGaussianBlur stdDeviation="2" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <!-- 그리드 -->
+        <line x1="0" y1="55" x2="680" y2="55" stroke="rgba(168,85,247,0.15)" stroke-width="0.5"/>
+        <line x1="0" y1="110" x2="680" y2="110" stroke="rgba(168,85,247,0.15)" stroke-width="0.5"/>
+        <line x1="0" y1="165" x2="680" y2="165" stroke="rgba(168,85,247,0.15)" stroke-width="0.5"/>
+        <line x1="0" y1="220" x2="680" y2="220" stroke="rgba(168,85,247,0.15)" stroke-width="0.5"/>
+        <!-- Candles with neon glow -->
+        <g filter="url(#neon)">
+          <rect x="20" y="80" width="12" height="55" fill="#ff2d87" opacity="0.9"/><line x1="26" y1="60" x2="26" y2="145" stroke="#ff2d87" stroke-width="1.2"/>
+          <rect x="45" y="65" width="12" height="70" fill="#ff2d87" opacity="0.9"/><line x1="51" y1="48" x2="51" y2="148" stroke="#ff2d87" stroke-width="1.2"/>
+          <rect x="70" y="95" width="12" height="45" fill="#39ff14" opacity="0.9"/><line x1="76" y1="82" x2="76" y2="150" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="95" y="85" width="12" height="65" fill="#39ff14" opacity="0.9"/><line x1="101" y1="70" x2="101" y2="160" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="120" y="75" width="12" height="75" fill="#39ff14" opacity="0.9"/><line x1="126" y1="58" x2="126" y2="162" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="145" y="95" width="12" height="38" fill="#ff2d87" opacity="0.9"/><line x1="151" y1="80" x2="151" y2="145" stroke="#ff2d87" stroke-width="1.2"/>
+          <rect x="170" y="80" width="12" height="85" fill="#39ff14" opacity="0.9"/><line x1="176" y1="65" x2="176" y2="175" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="195" y="70" width="12" height="95" fill="#39ff14" opacity="0.9"/><line x1="201" y1="55" x2="201" y2="177" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="220" y="65" width="12" height="85" fill="#39ff14" opacity="0.9"/><line x1="226" y1="50" x2="226" y2="160" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="245" y="85" width="12" height="45" fill="#ff2d87" opacity="0.9"/><line x1="251" y1="72" x2="251" y2="142" stroke="#ff2d87" stroke-width="1.2"/>
+          <rect x="270" y="95" width="12" height="55" fill="#ff2d87" opacity="0.9"/><line x1="276" y1="82" x2="276" y2="162" stroke="#ff2d87" stroke-width="1.2"/>
+          <rect x="295" y="75" width="12" height="90" fill="#39ff14" opacity="0.9"/><line x1="301" y1="60" x2="301" y2="177" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="320" y="60" width="12" height="105" fill="#39ff14" opacity="0.9"/><line x1="326" y1="45" x2="326" y2="177" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="345" y="55" width="12" height="95" fill="#39ff14" opacity="0.9"/><line x1="351" y1="40" x2="351" y2="162" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="370" y="50" width="12" height="88" fill="#39ff14" opacity="0.9"/><line x1="376" y1="36" x2="376" y2="150" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="395" y="70" width="12" height="42" fill="#ff2d87" opacity="0.9"/><line x1="401" y1="58" x2="401" y2="125" stroke="#ff2d87" stroke-width="1.2"/>
+          <rect x="420" y="65" width="12" height="78" fill="#39ff14" opacity="0.9"/><line x1="426" y1="50" x2="426" y2="155" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="445" y="58" width="12" height="85" fill="#39ff14" opacity="0.9"/><line x1="451" y1="44" x2="451" y2="155" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="470" y="75" width="12" height="52" fill="#ff2d87" opacity="0.9"/><line x1="476" y1="62" x2="476" y2="140" stroke="#ff2d87" stroke-width="1.2"/>
+          <rect x="495" y="80" width="12" height="58" fill="#ff2d87" opacity="0.9"/><line x1="501" y1="68" x2="501" y2="150" stroke="#ff2d87" stroke-width="1.2"/>
+          <rect x="520" y="68" width="12" height="72" fill="#39ff14" opacity="0.9"/><line x1="526" y1="54" x2="526" y2="152" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="545" y="60" width="12" height="78" fill="#39ff14" opacity="0.9"/><line x1="551" y1="46" x2="551" y2="150" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="570" y="52" width="12" height="85" fill="#39ff14" opacity="0.9"/><line x1="576" y1="38" x2="576" y2="148" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="595" y="48" width="12" height="82" fill="#39ff14" opacity="0.9"/><line x1="601" y1="34" x2="601" y2="142" stroke="#39ff14" stroke-width="1.2"/>
+          <rect x="620" y="44" width="12" height="78" fill="#39ff14" opacity="0.9"/><line x1="626" y1="30" x2="626" y2="134" stroke="#39ff14" stroke-width="1.2"/>
+        </g>
+        <!-- Current price neon line -->
+        <line x1="0" y1="88" x2="680" y2="88" stroke="#ff2d87" stroke-width="1" stroke-dasharray="4,4" opacity="0.7"/>
+        <rect x="638" y="78" width="42" height="18" fill="rgba(255,45,135,0.2)" rx="2" stroke="#ff2d87" stroke-width="0.8"/>
+        <text x="659" y="90" fill="#ff2d87" font-size="9" text-anchor="middle" font-weight="700">9,850</text>
+        <!-- Volume bars -->
+        <g opacity="0.3">
+          <rect x="20" y="228" width="12" height="22" fill="#ff2d87"/>
+          <rect x="45" y="223" width="12" height="27" fill="#ff2d87"/>
+          <rect x="70" y="230" width="12" height="20" fill="#39ff14"/>
+          <rect x="95" y="226" width="12" height="24" fill="#39ff14"/>
+          <rect x="120" y="222" width="12" height="28" fill="#39ff14"/>
+          <rect x="145" y="232" width="12" height="18" fill="#ff2d87"/>
+          <rect x="170" y="224" width="12" height="26" fill="#39ff14"/>
+          <rect x="195" y="220" width="12" height="30" fill="#39ff14"/>
+          <rect x="220" y="225" width="12" height="25" fill="#39ff14"/>
+          <rect x="245" y="229" width="12" height="21" fill="#ff2d87"/>
+          <rect x="270" y="226" width="12" height="24" fill="#ff2d87"/>
+          <rect x="295" y="221" width="12" height="29" fill="#39ff14"/>
+          <rect x="320" y="218" width="12" height="32" fill="#39ff14"/>
+          <rect x="345" y="219" width="12" height="31" fill="#39ff14"/>
+          <rect x="370" y="221" width="12" height="29" fill="#39ff14"/>
+          <rect x="395" y="231" width="12" height="19" fill="#ff2d87"/>
+          <rect x="420" y="224" width="12" height="26" fill="#39ff14"/>
+          <rect x="445" y="222" width="12" height="28" fill="#39ff14"/>
+          <rect x="470" y="228" width="12" height="22" fill="#ff2d87"/>
+          <rect x="495" y="227" width="12" height="23" fill="#ff2d87"/>
+          <rect x="520" y="223" width="12" height="27" fill="#39ff14"/>
+          <rect x="545" y="220" width="12" height="30" fill="#39ff14"/>
+          <rect x="570" y="217" width="12" height="33" fill="#39ff14"/>
+          <rect x="595" y="216" width="12" height="34" fill="#39ff14"/>
+          <rect x="620" y="214" width="12" height="36" fill="#39ff14"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <!-- 주문 패널 -->
+  <div class="order-col glass glass-pink">
+    <div class="order-top">
+      <div class="order-tabs">
+        <div class="otab buy-on">BUY</div>
+        <div class="otab sell-off">SELL</div>
+      </div>
+      <div class="field-label">PRICE (KRW)</div>
+      <input class="neon-input" value="9,850"/>
+      <div class="field-label">AMOUNT</div>
+      <input class="neon-input" placeholder="0 주"/>
+      <div class="pct-btns">
+        <span class="pct-btn">25%</span><span class="pct-btn">50%</span>
+        <span class="pct-btn">75%</span><span class="pct-btn">MAX</span>
+      </div>
+      <div class="field-label">TOTAL</div>
+      <input class="neon-input" value="0" style="color:rgba(255,255,255,0.3)"/>
+      <button class="submit-btn">▶ BUY ORDER</button>
+    </div>
+    <div style="padding:10px 12px;flex:1">
+      <div style="font-size:9px;color:rgba(168,85,247,0.8);letter-spacing:1px;margin-bottom:6px">ACCOUNT</div>
+      <div class="info-row"><span class="info-lbl">가용잔고</span><span style="color:#a855f7">₩4,820,000</span></div>
+      <div class="info-row"><span class="info-lbl">보유수량</span><span class="info-val">100주</span></div>
+      <div class="info-row"><span class="info-lbl">평균단가</span><span class="info-val">9,200</span></div>
+      <div class="info-row"><span class="info-lbl">평가손익</span><span class="grn">+6.52%</span></div>
+      <div style="font-size:9px;color:rgba(168,85,247,0.8);letter-spacing:1px;margin:10px 0 6px">OPEN ORDERS</div>
+      <div class="info-row"><span style="color:#ff2d87">SELL</span><span class="info-val">9,900 × 50</span></div>
+      <div class="info-row"><span style="color:#39ff14">BUY</span><span class="info-val">9,750 × 30</span></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
