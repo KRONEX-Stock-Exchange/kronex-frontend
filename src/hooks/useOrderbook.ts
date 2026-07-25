@@ -21,11 +21,17 @@ export interface StockInfo {
   lowerLimit: string;
 }
 
+export interface MatchItem {
+  price: string;
+  quantity: string;
+  type: "BUY" | "SELL";
+}
+
 export interface OrderbookData {
   stockInfo: StockInfo | null;
   buyOrderbookData: OrderbookItem[];
   sellOrderbookData: OrderbookItem[];
-  match: { price: string; quantity: string; type: string }[];
+  match: MatchItem[];
 }
 
 export function useOrderbook(stockId: number | null) {
@@ -60,18 +66,24 @@ export function useOrderbook(stockId: number | null) {
         setData((prev) => ({ ...prev, buyOrderbookData: buyOrderbook, sellOrderbookData: sellOrderbook }));
       });
 
-      newSocket.on("matchedListUpdated", (matched: { price: string; quantity: string; type: string }[]) => {
+      newSocket.on("matchedListUpdated", (matched: MatchItem[]) => {
         setData((prev) => ({ ...prev, match: matched }));
       });
 
       newSocket.on("errorCustom", async ({ message }: { message: string }) => {
+        newSocket.disconnect();
         if (message === "AccessToken이 만료되었습니다.") {
-          newSocket.disconnect();
           const newToken = await tokenManager.refresh();
           if (active && newToken) {
             connect();
           }
+        } else {
+          tokenManager.redirectToLogin();
         }
+      });
+
+      newSocket.on("exception", (err: { message: string; errorCode: string }) => {
+        console.error(`[WS] ${err.errorCode}: ${err.message}`);
       });
 
       socketRef.current = newSocket;

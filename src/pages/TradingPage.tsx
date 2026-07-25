@@ -233,7 +233,7 @@ export function TradingPage() {
                         </option>
                       ))}
                     </select>
-                    {accountData && (
+                    {accountData?.account && (
                       <div className="grid grid-cols-[minmax(130px,1fr)_1px_minmax(130px,1fr)] gap-3 px-3 py-2 bg-[#2b2f36] rounded-lg border border-[#3b3f46]">
                         <div className="flex min-w-0 flex-col gap-0.5">
                           <span className="text-[10px] text-zinc-500">
@@ -363,9 +363,9 @@ export function TradingPage() {
                         <td className="py-2">{order.id}</td>
                         <td className="py-2">{order.stockName}</td>
                         <td
-                          className={`text-right py-2 ${order.tradingType.toLowerCase() === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}
+                          className={`text-right py-2 ${order.tradingType === "BUY" ? "text-[#f6465d]" : "text-[#2563eb]"}`}
                         >
-                          {order.tradingType.toLowerCase() === "buy" ? "매수" : "매도"}
+                          {order.tradingType === "BUY" ? "매수" : "매도"}
                         </td>
                         <td className="text-right py-2">
                           {order.orderType === "MARKET" ? "시장가" : "지정가"}
@@ -430,9 +430,9 @@ export function TradingPage() {
                           <td className="py-2">{order.id}</td>
                           <td className="py-2">{order.stockName}</td>
                           <td
-                            className={`text-right py-2 ${order.tradingType.toLowerCase() === "buy" ? "text-[#f6465d]" : "text-[#2563eb]"}`}
+                            className={`text-right py-2 ${order.tradingType === "BUY" ? "text-[#f6465d]" : "text-[#2563eb]"}`}
                           >
-                            {order.tradingType.toLowerCase() === "buy" ? "매수" : "매도"}
+                            {order.tradingType === "BUY" ? "매수" : "매도"}
                           </td>
                           <td className="text-right py-2">
                             {order.orderType === "MARKET" ? "시장가" : "지정가"}
@@ -649,12 +649,12 @@ export function TradingPage() {
                         <span className="text-zinc-400">유형</span>
                         <span
                           className={
-                            selectedOrder.tradingType === "buy"
+                            selectedOrder.tradingType === "BUY"
                               ? "text-[#f6465d]"
                               : "text-[#2563eb]"
                           }
                         >
-                          {selectedOrder.tradingType === "buy"
+                          {selectedOrder.tradingType === "BUY"
                             ? "매수"
                             : "매도"}
                         </span>
@@ -710,12 +710,12 @@ export function TradingPage() {
                         <span className="text-zinc-400">유형</span>
                         <span
                           className={
-                            selectedOrder.tradingType === "buy"
+                            selectedOrder.tradingType === "BUY"
                               ? "text-[#f6465d]"
                               : "text-[#2563eb]"
                           }
                         >
-                          {selectedOrder.tradingType === "buy"
+                          {selectedOrder.tradingType === "BUY"
                             ? "매수"
                             : "매도"}
                         </span>
@@ -880,7 +880,7 @@ export function TradingPage() {
                     </option>
                   ))}
                 </select>
-                {accountData && (
+                {accountData?.account && (
                   <p className="text-[10px] text-zinc-500 mt-1 px-1">
                     사용 가능:{" "}
                     <span className="text-[#0ecb81]">

@@ -119,10 +119,3 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string | ApiError;
 }
-
-// WebSocket Message Types
-export interface WSMessage<T = unknown> {
-  type: string;
-  channel: string;
-  data: T;
-}

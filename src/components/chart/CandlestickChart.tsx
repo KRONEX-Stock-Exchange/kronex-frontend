@@ -293,6 +293,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
 
   // 데이터 로딩 + 소켓 (stockId, chartType 변경 시 재실행)
   useEffect(() => {
+    if (stockId === null) return;
     const candleSeries = candleSeriesRef.current;
     const volumeSeries = volumeSeriesRef.current;
     const maSeries = maSeriesRef.current;
@@ -398,14 +399,18 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       });
       socketRef.current = socket;
 
-      // 1. GET 완료 후 lastCandleTime을 from으로 입장
+      // 1. GET 완료 후 lastCandleTime을 from으로 입장 (없으면 생략 — 진행 중인 봉만 수신)
       socket.on("connect", () => {
-socket.emit("joinChartRoom", { stockId, type: chartType, from: lastCandleTime });
+        socket.emit("joinChartRoom", {
+          stockId,
+          type: chartType,
+          ...(lastCandleTime ? { from: lastCandleTime } : {}),
+        });
       });
 
       // 2. GET과 소켓 사이 누락된 봉 보충 (같은 candleTime은 chartInit 데이터로 덮어씌움)
       socket.on("chartInit", (candles: CandleItem[]) => {
-for (const c of candles) {
+        for (const c of candles) {
           candleMapRef.current.set(c.candleTime, parseCandle(c, chartType));
         }
         applyAllData();
@@ -413,15 +418,21 @@ for (const c of candles) {
 
       // 3. 실시간 체결 업데이트
       socket.on("chartUpdated", (candle: CandleItem) => {
-updateLastCandle(candle);
+        updateLastCandle(candle);
       });
 
       socket.on("errorCustom", async ({ message }: { message: string }) => {
+        socket.disconnect();
         if (message === "AccessToken이 만료되었습니다.") {
-          socket.disconnect();
           const newToken = await tokenManager.refresh();
           if (active && newToken) connectSocket(newToken);
+        } else {
+          tokenManager.redirectToLogin();
         }
+      });
+
+      socket.on("exception", (err: { message: string; errorCode: string }) => {
+        console.error(`[WS] ${err.errorCode}: ${err.message}`);
       });
     };
 

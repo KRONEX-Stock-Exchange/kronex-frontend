@@ -19,14 +19,21 @@ export interface Holding {
 export interface OrderItem {
   id: string;
   stockId: number;
-  stockName: string;
+  stockName?: string;
   price: string;
   quantity: string;
   filledQuantity: string;
-  orderType: string;
-  tradingType: string;
-  status: string;
-  createdAt: string;
+  orderType?: "LIMIT" | "MARKET";
+  tradingType: "BUY" | "SELL" | "EDIT" | "CANCEL";
+  status:
+    | "RECEIVED"
+    | "OPEN"
+    | "FILLED"
+    | "CANCELED"
+    | "REPLACED"
+    | "REJECTED"
+    | "COMPLETED";
+  createdAt?: string;
 }
 
 export interface OrderData {
@@ -34,13 +41,15 @@ export interface OrderData {
   openOrders: OrderItem[];
 }
 
+export interface AccountInfo {
+  id: number;
+  accountNumber?: number;
+  balance: string;
+  availableBalance: string;
+}
+
 export interface AccountData {
-  account: {
-    id: number;
-    accountNumber: number;
-    balance: string;
-    availableBalance: string;
-  };
+  account: AccountInfo | null;
   holdings: Holding[];
 }
 
@@ -70,22 +79,33 @@ export function useAccountData(accountId: number | null) {
       });
 
       newSocket.on("accountInit", (receivedData: AccountData) => {
-        setData(receivedData);
-      });
-
-      newSocket.on("accountBalanceUpdated", ({ balance, availableBalance }: { id: number; balance: string; availableBalance: string }) => {
-        setData((prev) => {
-          if (!prev) return prev;
-          return { ...prev, account: { ...prev.account, balance, availableBalance } };
+        setData({
+          ...receivedData,
+          holdings: receivedData.holdings.filter(
+            (holding) =>
+              Number(holding.quantity) !== 0 ||
+              Number(holding.availableQuantity) !== 0,
+          ),
         });
       });
 
-      newSocket.on("holdingUpdated", (updated: Omit<Holding, "stock">) => {
+      newSocket.on("accountBalanceUpdated", (account: AccountInfo | null) => {
+        setData((prev) => (prev ? { ...prev, account } : prev));
+      });
+
+      newSocket.on(
+        "holdingUpdated",
+        (updated: Omit<Holding, "stock"> | null) => {
+          if (!updated) return;
+
         setData((prev) => {
           if (!prev) return prev;
 
-          // 수량 0 → 보유 종목 제거
-          if (Number(updated.quantity) === 0) {
+          // 보유·가능 수량이 모두 0일 때만 보유 종목 제거
+          if (
+            Number(updated.quantity) === 0 &&
+            Number(updated.availableQuantity) === 0
+          ) {
             return {
               ...prev,
               holdings: prev.holdings.filter((h) => h.stockId !== updated.stockId),
@@ -106,7 +126,8 @@ export function useAccountData(accountId: number | null) {
           newSocket.emit("joinAccountRoom", accountId);
           return prev;
         });
-      });
+        },
+      );
 
       newSocket.on("openOrdersUpdated", (data: OrderItem[]) => {
         setOrderData((prev) => ({
@@ -123,11 +144,17 @@ export function useAccountData(accountId: number | null) {
       });
 
       newSocket.on("errorCustom", async ({ message }: { message: string }) => {
+        newSocket.disconnect();
         if (message === "AccessToken이 만료되었습니다.") {
-          newSocket.disconnect();
           const newToken = await tokenManager.refresh();
           if (active && newToken) connect();
+        } else {
+          tokenManager.redirectToLogin();
         }
+      });
+
+      newSocket.on("exception", (err: { message: string; errorCode: string }) => {
+        console.error(`[WS] ${err.errorCode}: ${err.message}`);
       });
 
       socketRef.current = newSocket;
@@ -169,33 +196,49 @@ export function useAccountData(accountId: number | null) {
     }
 
     // 새로 보유한 종목 소켓 생성 (기존 소켓은 건드리지 않음)
-    for (const stockId of currentStockIds) {
-      if (priceSockets.current.has(stockId)) continue;
-
+    const connectPriceSocket = (id: number) => {
       const priceSocket = io(`${REALTIME_URL}/stock`, {
         transports: ["websocket"],
         auth: { token: tokenManager.getToken() },
       });
 
       priceSocket.on("connect", () => {
-        priceSocket.emit("joinStockPriceRoom", stockId);
+        priceSocket.emit("joinStockPriceRoom", id);
       });
 
-      priceSocket.on("stockPriceUpdated", (newPrice: number) => {
+      priceSocket.on("stockPriceUpdated", (newPrice: string) => {
         setData((prev) => {
           if (!prev) return prev;
           return {
             ...prev,
             holdings: prev.holdings.map((h) =>
-              h.stock.id === stockId
-                ? { ...h, stock: { ...h.stock, price: newPrice.toString() } }
+              h.stock.id === id
+                ? { ...h, stock: { ...h.stock, price: newPrice } }
                 : h,
             ),
           };
         });
       });
 
-      priceSockets.current.set(stockId, priceSocket);
+      priceSocket.on("errorCustom", async ({ message }: { message: string }) => {
+        priceSocket.disconnect();
+        if (message === "AccessToken이 만료되었습니다.") {
+          const newToken = await tokenManager.refresh();
+          // 갱신 대기 중 보유 종목에서 빠졌다면 재연결하지 않음
+          if (newToken && priceSockets.current.get(id) === priceSocket) {
+            connectPriceSocket(id);
+          }
+        } else {
+          tokenManager.redirectToLogin();
+        }
+      });
+
+      priceSockets.current.set(id, priceSocket);
+    };
+
+    for (const stockId of currentStockIds) {
+      if (priceSockets.current.has(stockId)) continue;
+      connectPriceSocket(stockId);
     }
   }, [data?.holdings?.length]);
 

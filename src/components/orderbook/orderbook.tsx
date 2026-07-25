@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import { useOrderbook } from "../../hooks/useOrderbook";
-import type { StockInfo, OrderbookItem } from "../../hooks/useOrderbook";
+import type { StockInfo, OrderbookItem, MatchItem } from "../../hooks/useOrderbook";
 import { Tick, EmptyTick } from "./tick";
 
 const toNum = (s: string | undefined | null) => {
@@ -15,12 +15,6 @@ interface OrderBookProps {
 }
 
 // 체결 현황 컴포넌트
-interface MatchItem {
-  price: string;
-  quantity: string;
-  type: string;
-}
-
 function MatchHistory({
   matches,
   previousClose,
@@ -34,8 +28,8 @@ function MatchHistory({
     return "text-white";
   };
 
-  const getNumberColor = (type: string) => {
-    return type?.toLowerCase() === "buy" ? "text-[#f6465d]" : "text-[#2563eb]";
+  const getNumberColor = (type: "BUY" | "SELL") => {
+    return type === "BUY" ? "text-[#f6465d]" : "text-[#2563eb]";
   };
 
   return (

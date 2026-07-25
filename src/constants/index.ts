@@ -34,17 +34,6 @@ export const ORDER_STATUSES = {
   CANCELLED: "CANCELLED",
 } as const;
 
-// WebSocket Channels
-export const WS_CHANNELS = {
-  TICKER: "ticker",
-  ORDERBOOK: "orderbook",
-  TRADES: "trades",
-  CANDLES: "candles",
-  USER_ORDERS: "user.orders",
-  USER_TRADES: "user.trades",
-  USER_BALANCE: "user.balance",
-} as const;
-
 // Local Storage Keys
 export const STORAGE_KEYS = {
   ACCESS_TOKEN: "access_token",
