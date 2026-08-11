@@ -5,7 +5,7 @@ interface StockListItem {
   id: number;
   name: string;
   price: string;
-  per: string;
+  changeRate: number;
 }
 
 interface StockHeaderProps {
@@ -118,7 +118,7 @@ export function StockHeader({ stockInfo, stocks, selectedStockId, onSelectStock 
           {/* 리스트 */}
           <div className="max-h-64 overflow-y-auto">
             {filtered.length > 0 ? filtered.map((stock) => {
-              const per = parseFloat(stock.per);
+              const per = stock.changeRate;
               const isUp = per > 0;
               const isDown = per < 0;
               const isSelected = stock.id === selectedStockId;

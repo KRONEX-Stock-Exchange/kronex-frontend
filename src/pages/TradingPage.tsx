@@ -11,7 +11,7 @@ interface StockItem {
   id: number;
   name: string;
   price: string;
-  per: string;
+  changeRate: number;
 }
 
 const fmtWon = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -767,10 +767,8 @@ export function TradingPage() {
                   </tr>
                 </thead>
                 <tbody className="text-white">
-                  {[...stocks]
-                    .sort((a, b) => parseFloat(b.per) - parseFloat(a.per))
-                    .map((stock, i) => {
-                      const per = parseFloat(stock.per);
+                  {stocks.map((stock, i) => {
+                      const per = stock.changeRate;
                       const color =
                         per > 0
                           ? "text-[#f6465d]"
