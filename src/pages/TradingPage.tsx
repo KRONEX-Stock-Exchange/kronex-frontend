@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { OrderBook } from "../components/orderbook/orderbook";
 import { StockHeader } from "../components/stock/StockHeader";
 import { CandlestickChart } from "../components/chart/CandlestickChart";
@@ -108,7 +108,7 @@ function StepperInput({
 }
 
 export function TradingPage() {
-  const chartPanelRef = useRef<HTMLDivElement>(null);
+  const [chartPanel, setChartPanel] = useState<HTMLDivElement | null>(null);
   const [stockId, setStockId] = useState<number | null>(null);
   const { data } = useOrderbook(stockId);
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
@@ -255,13 +255,13 @@ export function TradingPage() {
           stocks={stocks}
           selectedStockId={stockId}
           onSelectStock={setStockId}
-          contentWidthRef={chartPanelRef}
+          contentWidthTarget={chartPanel}
         />
       </div>
 
       <div className="flex flex-1 min-h-0 gap-2.5 px-5 pt-2.5 pb-2.5">
         {/* 좌: 차트 + 계좌 */}
-        <div ref={chartPanelRef} className="flex-5 min-w-0 min-h-0 flex flex-col gap-2.5">
+        <div ref={setChartPanel} className="flex-5 min-w-0 min-h-0 flex flex-col gap-2.5">
           <div className="flex-52 min-h-0">
             <CandlestickChart stockId={stockId} />
           </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import type { StockInfo } from "../../hooks/useOrderbook";
 
 interface StockListItem {
@@ -14,7 +14,7 @@ interface StockHeaderProps {
   selectedStockId: number | null;
   onSelectStock: (id: number) => void;
   // 종목 선택 영역(드롭다운 포함)을 차트 패널 폭에 맞춘다.
-  contentWidthRef?: RefObject<HTMLDivElement | null>;
+  contentWidthTarget?: HTMLDivElement | null;
 }
 
 type Category = "전체" | "관심" | "상승" | "하락";
@@ -37,7 +37,7 @@ function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
   );
 }
 
-export function StockHeader({ stockInfo, stocks, selectedStockId, onSelectStock, contentWidthRef }: StockHeaderProps) {
+export function StockHeader({ stockInfo, stocks, selectedStockId, onSelectStock, contentWidthTarget }: StockHeaderProps) {
   const [open, setOpen] = useState(false);
   const [contentWidth, setContentWidth] = useState<number | null>(null);
   const [query, setQuery] = useState("");
@@ -92,15 +92,14 @@ export function StockHeader({ stockInfo, stocks, selectedStockId, onSelectStock,
   }, [open]);
 
   useLayoutEffect(() => {
-    const contentEl = contentWidthRef?.current;
-    if (!contentEl) return;
+    if (!contentWidthTarget) return;
 
-    const update = () => setContentWidth(contentEl.getBoundingClientRect().width);
+    const update = () => setContentWidth(contentWidthTarget.getBoundingClientRect().width);
     update();
     const observer = new ResizeObserver(update);
-    observer.observe(contentEl);
+    observer.observe(contentWidthTarget);
     return () => observer.disconnect();
-  }, [contentWidthRef]);
+  }, [contentWidthTarget]);
 
   const price = stockInfo ? parseFloat(stockInfo.price) : 0;
   const prevClose = stockInfo ? parseFloat(stockInfo.prevClose) : 0;
