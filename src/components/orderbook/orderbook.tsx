@@ -250,7 +250,7 @@ export function OrderBook({ stockId }: OrderBookProps) {
   const emptyBuyCount = MAX_TICKS - sortedBuyOrders.length;
 
   return (
-    <div className="h-full bg-[#181a20] rounded-2xl overflow-hidden relative">
+    <div className="h-full bg-[#181a20] rounded-xl overflow-hidden relative">
       {/* 주식 정보 패널 (매도 영역 오른쪽) */}
       <div className="absolute right-0 top-0 w-[38%] h-[48%]">
         <StockInfoPanel stockInfo={data?.stockInfo || null} />

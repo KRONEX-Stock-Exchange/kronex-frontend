@@ -61,6 +61,8 @@ body {
   -ms-overflow-style: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  /* 스크롤바 등장/소멸로 내용 폭이 흔들리지 않도록 항상 자리를 확보한다 */
+  scrollbar-gutter: stable;
 }
 
 .scrollbar-thin::-webkit-scrollbar {
@@ -74,9 +76,21 @@ body {
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
-  border-radius: 9999px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
+}
+
+/* number 입력의 기본 스피너(위/아래 화살표) 숨김 */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }

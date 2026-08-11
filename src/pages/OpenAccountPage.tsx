@@ -35,24 +35,19 @@ export function OpenAccountPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0f0f12] px-4">
+    <div className="min-h-screen flex items-center justify-center bg-[#14161b] px-4">
       <div className="w-full max-w-100">
         {/* 헤더 */}
         <div className="mb-10 text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#78350F] mb-4">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <polygon points="3,25 14,3 25,25 14,16" fill="white"/>
-            </svg>
-          </div>
-          <p className="text-xs font-bold tracking-widest mb-1"><span className="text-[#F59E0B]">K</span><span className="text-white">RONEX</span></p>
+          <p className="text-3xl tracking-tight mb-4 font-['Archivo_Black']"><span className="text-[#F59E0B]">K</span><span className="text-white">RONEX</span></p>
           <h1 className="text-2xl font-bold text-white">계좌 개설</h1>
         </div>
 
         {/* 에러 */}
         {error && (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-[#2c0a0a] border border-[#FF3B30]/30 mb-4">
-            <span className="text-[#FF3B30]">⚠</span>
-            <p className="text-[#FF3B30] text-sm">{error}</p>
+          <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-[#d03b3b]/10 border border-[#d03b3b]/30 mb-4">
+            <span className="text-[#e2685f]">⚠</span>
+            <p className="text-[#e2685f] text-sm">{error}</p>
           </div>
         )}
 
@@ -60,7 +55,7 @@ export function OpenAccountPage() {
         <button
           onClick={handleSubmit}
           disabled={loading}
-          className="w-full py-4 bg-[#D97706] hover:bg-[#B45309] active:bg-[#92400E] text-white font-bold rounded-2xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-sm"
+          className="w-full py-4 bg-[#D97706] hover:bg-[#B45309] active:bg-[#92400E] text-white font-bold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-sm"
         >
           {loading ? "개설 중..." : "계좌 개설하기"}
         </button>

@@ -25,10 +25,10 @@ const CHART_TYPES: { label: string; value: ChartType }[] = [
 ];
 
 const MA_CONFIGS = [
-  { period: 5, color: "#F3BA2F" },
-  { period: 20, color: "#8B5CF6" },
-  { period: 60, color: "#06B6D4" },
-  { period: 120, color: "#F97316" },
+  { period: 5, color: "#c98500" },
+  { period: 20, color: "#9085e9" },
+  { period: 60, color: "#199e70" },
+  { period: 120, color: "#d95926" },
 ] as const;
 
 interface CandleItem {
@@ -505,7 +505,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
   }, [stockId, chartType]);
 
   return (
-    <div className="w-full h-full bg-[#181a20] rounded-2xl overflow-hidden p-2 flex flex-col">
+    <div className="w-full h-full bg-[#181a20] rounded-xl overflow-hidden p-2 flex flex-col">
       {/* 상단 툴바: 시간대 선택 + MA 범례 */}
       <div className="flex items-center gap-1 mb-1 shrink-0">
         <div className="flex gap-0.5">
@@ -513,7 +513,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
             <button
               key={ct.value}
               onClick={() => setChartType(ct.value)}
-              className={`px-2 py-0.5 text-xs rounded transition-colors ${
+              className={`px-2 py-0.5 text-xs rounded-md transition-colors ${
                 chartType === ct.value
                   ? "bg-[#2b2f36] text-white"
                   : "text-zinc-500 hover:text-zinc-300"

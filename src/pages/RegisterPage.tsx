@@ -82,26 +82,21 @@ export function RegisterPage() {
   ] as const;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0f0f12] px-4">
+    <div className="min-h-screen flex items-center justify-center bg-[#14161b] px-4">
       <div className="w-full max-w-100">
         {/* 로고 */}
         <div className="mb-10 text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#78350F] mb-4">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <polygon points="3,25 14,3 25,25 14,16" fill="white"/>
-            </svg>
-          </div>
-          <p className="text-xs font-bold tracking-widest mb-1"><span className="text-[#F59E0B]">K</span><span className="text-white">RONEX</span></p>
+          <p className="text-3xl tracking-tight mb-4 font-['Archivo_Black']"><span className="text-[#F59E0B]">K</span><span className="text-white">RONEX</span></p>
           <h1 className="text-2xl font-bold text-white">처음 오셨군요!</h1>
-          <p className="text-[#8e8e93] text-sm mt-1">계정을 만들고 거래를 시작하세요</p>
+          <p className="text-zinc-400 text-sm mt-1">계정을 만들고 거래를 시작하세요</p>
         </div>
 
         {/* 폼 카드 */}
-        <div className="bg-[#1c1c1f] rounded-3xl p-6 border border-[#2a2a2d]">
+        <div className="bg-[#181a20] rounded-xl p-6 border border-[#2b2f36]">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             {fields.map((field) => (
               <div key={field.name} className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-[#8e8e93]">{field.label}</label>
+                <label className="text-xs font-medium text-zinc-400">{field.label}</label>
                 <input
                   type={field.type}
                   name={field.name}
@@ -110,13 +105,13 @@ export function RegisterPage() {
                   placeholder={field.placeholder}
                   autoComplete={field.autoComplete}
                   required
-                  className="w-full bg-[#242427] text-white placeholder-[#48484a] px-4 py-3.5 rounded-xl border border-[#3a3a3d] outline-none focus:border-[#F59E0B] transition-colors text-sm"
+                  className="w-full bg-[#1f232b] text-white placeholder-zinc-500 px-4 py-3.5 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B] transition-colors text-sm"
                 />
               </div>
             ))}
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-[#8e8e93]">비밀번호</label>
+              <label className="text-xs font-medium text-zinc-400">비밀번호</label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
@@ -126,17 +121,17 @@ export function RegisterPage() {
                   placeholder="비밀번호를 입력하세요"
                   autoComplete="new-password"
                   required
-                  className="w-full bg-[#242427] text-white placeholder-[#48484a] px-4 py-3.5 pr-11 rounded-xl border border-[#3a3a3d] outline-none focus:border-[#F59E0B] transition-colors text-sm"
+                  className="w-full bg-[#1f232b] text-white placeholder-zinc-500 px-4 py-3.5 pr-11 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B] transition-colors text-sm"
                 />
                 <button type="button" onClick={() => setShowPassword((v) => !v)} tabIndex={-1}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#48484a] hover:text-zinc-300 transition-colors">
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors">
                   <EyeIcon visible={showPassword} />
                 </button>
               </div>
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-[#8e8e93]">비밀번호 확인</label>
+              <label className="text-xs font-medium text-zinc-400">비밀번호 확인</label>
               <div className="relative">
                 <input
                   type={showConfirm ? "text" : "password"}
@@ -145,26 +140,26 @@ export function RegisterPage() {
                   placeholder="비밀번호를 다시 입력하세요"
                   autoComplete="new-password"
                   required
-                  className="w-full bg-[#242427] text-white placeholder-[#48484a] px-4 py-3.5 pr-11 rounded-xl border border-[#3a3a3d] outline-none focus:border-[#F59E0B] transition-colors text-sm"
+                  className="w-full bg-[#1f232b] text-white placeholder-zinc-500 px-4 py-3.5 pr-11 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B] transition-colors text-sm"
                 />
                 <button type="button" onClick={() => setShowConfirm((v) => !v)} tabIndex={-1}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#48484a] hover:text-zinc-300 transition-colors">
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors">
                   <EyeIcon visible={showConfirm} />
                 </button>
               </div>
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#2c0a0a] border border-[#FF3B30]/30">
-                <span className="text-[#FF3B30] text-sm">⚠</span>
-                <p className="text-[#FF3B30] text-xs">{error}</p>
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-[#d03b3b]/10 border border-[#d03b3b]/30">
+                <span className="text-[#e2685f] text-sm">⚠</span>
+                <p className="text-[#e2685f] text-xs">{error}</p>
               </div>
             )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 bg-[#D97706] hover:bg-[#B45309] active:bg-[#92400E] text-white font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed mt-1 text-sm"
+              className="w-full py-3.5 bg-[#D97706] hover:bg-[#B45309] active:bg-[#92400E] text-white font-bold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed mt-1 text-sm"
             >
               {loading ? "처리 중..." : "회원가입"}
             </button>
@@ -172,7 +167,7 @@ export function RegisterPage() {
         </div>
 
         {/* 로그인 링크 */}
-        <p className="text-center text-sm text-[#8e8e93] mt-6">
+        <p className="text-center text-sm text-zinc-400 mt-6">
           이미 계정이 있으신가요?{" "}
           <button
             type="button"

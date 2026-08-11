@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { OrderBook } from "../components/orderbook/orderbook";
 import { StockHeader } from "../components/stock/StockHeader";
 import { CandlestickChart } from "../components/chart/CandlestickChart";
@@ -6,6 +6,7 @@ import { useOrderbook } from "../hooks/useOrderbook";
 import { useAccountData, type OrderItem } from "../hooks/useAccountData";
 import { useAccount } from "../contexts/AccountContext";
 import { apiClient } from "../services/api/client";
+import { getTickSize, stepPrice } from "../utils/tick";
 
 interface StockItem {
   id: number;
@@ -17,9 +18,97 @@ interface StockItem {
 const fmtWon = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 type OrderTypeTab = "매수" | "매도" | "정정" | "취소";
-type AccountTab = "내 계좌" | "체결" | "미체결";
+type AccountTab = "계좌" | "체결" | "미체결" | "송금";
+
+// 우측 위/아래 화살표로 증감하는 숫자 입력 (방향키도 동일하게 동작)
+function StepperInput({
+  label,
+  value,
+  onChange,
+  onStep,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  onStep: (current: number, dir: 1 | -1) => number;
+  hint?: string;
+}) {
+  const step = (dir: 1 | -1) =>
+    onChange(String(onStep(parseInt(value) || 0, dir)));
+
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-2 mb-1">
+        <label className="text-xs text-zinc-500">{label}</label>
+        {hint && (
+          <span className="text-[10px] text-zinc-600 shrink-0">{hint}</span>
+        )}
+      </div>
+      <div className="flex items-center bg-[#1f232b] rounded-lg">
+        <input
+          type="number"
+          placeholder="0"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              step(1);
+            } else if (e.key === "ArrowDown") {
+              e.preventDefault();
+              step(-1);
+            }
+          }}
+          className="w-full min-w-0 bg-transparent text-white text-xs px-3 py-2 outline-none"
+        />
+        <div className="flex flex-col shrink-0 pr-2 -space-y-0.5">
+          <button
+            type="button"
+            onClick={() => step(1)}
+            className="flex items-center justify-center w-5 h-3 text-zinc-500 hover:text-white transition-colors"
+          >
+            <svg
+              className="w-2.5 h-2.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={3}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M5 15l7-7 7 7"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => step(-1)}
+            className="flex items-center justify-center w-5 h-3 text-zinc-500 hover:text-white transition-colors"
+          >
+            <svg
+              className="w-2.5 h-2.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={3}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
 
 export function TradingPage() {
+  const chartPanelRef = useRef<HTMLDivElement>(null);
   const [stockId, setStockId] = useState<number | null>(null);
   const { data } = useOrderbook(stockId);
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
@@ -27,7 +116,7 @@ export function TradingPage() {
     selectedAccount?.id ?? null,
   );
 
-  const [accountTab, setAccountTab] = useState<AccountTab>("내 계좌");
+  const [accountTab, setAccountTab] = useState<AccountTab>("계좌");
   const [orderType, setOrderType] = useState<OrderTypeTab>("매수");
   const [priceType, setPriceType] = useState<"지정가" | "시장가">("지정가");
   const [price, setPrice] = useState("");
@@ -45,10 +134,14 @@ export function TradingPage() {
   const [amendLoading, setAmendLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
 
-  const [showTransfer, setShowTransfer] = useState(false);
-  const [transferAmount, setTransferAmount] = useState("");
-  const [transferTo, setTransferTo] = useState("");
-  const [transferLoading, setTransferLoading] = useState(false);
+  // 종목이 바뀌면 주문가격을 그 종목의 현재가로 1회 초기화한다.
+  // (렌더 중 상태 조정 패턴 — 이후 사용자가 입력한 값은 덮어쓰지 않는다)
+  const [pricedStockId, setPricedStockId] = useState<number | null>(null);
+  const livePrice = data?.stockInfo?.price;
+  if (stockId !== null && livePrice && pricedStockId !== stockId) {
+    setPricedStockId(stockId);
+    setPrice(String(Math.trunc(Number(livePrice))));
+  }
 
   useEffect(() => {
     const fetchStocks = async () => {
@@ -59,7 +152,7 @@ export function TradingPage() {
       }
     };
     fetchStocks();
-    const interval = setInterval(fetchStocks, 300000);
+    const interval = setInterval(fetchStocks, 150000);
     return () => clearInterval(interval);
   }, []);
 
@@ -147,38 +240,6 @@ export function TradingPage() {
     }
   };
 
-  const handleTransfer = async () => {
-    const amount = parseInt(transferAmount);
-    const toAccountNumber = parseInt(transferTo);
-    if (!amount || amount < 1)
-      return showToast("금액을 입력해주세요.", "error");
-    if (!toAccountNumber)
-      return showToast("받는 계좌번호를 입력해주세요.", "error");
-    if (!selectedAccount) return showToast("계좌를 선택해주세요.", "error");
-    setTransferLoading(true);
-    try {
-      const response = await apiClient.post(
-        `/accounts/${selectedAccount.accountNumber}/transfer`,
-        {
-          amount,
-          toAccountNumber,
-        },
-      );
-      if (response.success) {
-        showToast("송금이 완료되었습니다.", "success");
-        setShowTransfer(false);
-        setTransferAmount("");
-        setTransferTo("");
-      } else {
-        showToast(getErrorMsg(response.error, "송금에 실패했습니다."), "error");
-      }
-    } catch {
-      showToast("서버 연결에 실패했습니다.", "error");
-    } finally {
-      setTransferLoading(false);
-    }
-  };
-
   const selectOrder = (order: OrderItem) => {
     setSelectedOrder(order);
     setAmendPrice(order.price);
@@ -187,86 +248,95 @@ export function TradingPage() {
 
   return (
     <div className="flex flex-col h-full w-full">
-      <StockHeader
-        stockInfo={data?.stockInfo ?? null}
-        stocks={stocks}
-        selectedStockId={stockId}
-        onSelectStock={setStockId}
-      />
+      {/* 종목 선택 바는 거래 화면 전체 폭을 사용한다. */}
+      <div className="shrink-0 px-5 pt-2.5">
+        <StockHeader
+          stockInfo={data?.stockInfo ?? null}
+          stocks={stocks}
+          selectedStockId={stockId}
+          onSelectStock={setStockId}
+          contentWidthRef={chartPanelRef}
+        />
+      </div>
 
-      <div className="flex flex-1 min-h-0 p-5 pb-5 pt-2">
+      <div className="flex flex-1 min-h-0 gap-2.5 px-5 pt-2.5 pb-2.5">
         {/* 좌: 차트 + 계좌 */}
-        <div className="w-[50%] min-h-0 flex flex-col p-2 gap-2">
-          <div className="h-[52%]">
+        <div ref={chartPanelRef} className="flex-5 min-w-0 min-h-0 flex flex-col gap-2.5">
+          <div className="flex-52 min-h-0">
             <CandlestickChart stockId={stockId} />
           </div>
-          <div className="h-[48%] min-h-0 bg-[#181a20] rounded-2xl p-4 flex flex-col">
+          <div className="flex-48 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
             <div className="flex items-center gap-4 mb-3 shrink-0">
-              {(["내 계좌", "체결", "미체결"] as AccountTab[]).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setAccountTab(tab)}
-                  className={`text-sm ${accountTab === tab ? "text-white" : "text-zinc-400"}`}
-                >
-                  {tab}
-                </button>
-              ))}
+              {(["계좌", "체결", "미체결", "송금"] as AccountTab[]).map(
+                (tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setAccountTab(tab)}
+                    className={`text-sm ${accountTab === tab ? "text-white" : "text-zinc-400"}`}
+                  >
+                    {tab}
+                  </button>
+                ),
+              )}
             </div>
 
             <div className="flex-1 min-h-0 overflow-auto scrollbar-thin">
-              {accountTab === "내 계좌" && (
+              {accountTab === "계좌" && (
                 <>
-                  <div className="mb-3 flex flex-col gap-2">
-                    <select
-                      value={selectedAccount?.id ?? ""}
-                      onChange={(e) => {
-                        const account = accounts.find(
-                          (a) => a.id === Number(e.target.value),
-                        );
-                        if (account) setSelectedAccount(account);
-                      }}
-                      className="bg-[#2b2f36] text-white text-xs px-3 py-1 rounded-lg border border-[#3b3f46] outline-none w-fit"
-                    >
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.accountNumber}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="mb-3 flex items-center gap-6 pb-2.5">
                     {accountData?.account && (
-                      <div className="grid grid-cols-[minmax(130px,1fr)_1px_minmax(130px,1fr)] gap-3 px-3 py-2 bg-[#2b2f36] rounded-lg border border-[#3b3f46]">
-                        <div className="flex min-w-0 flex-col gap-0.5">
+                      <>
+                        <div className="flex min-w-0 flex-col gap-1">
                           <span className="text-[10px] text-zinc-500">
-                            예수금
+                            보유 금액
                           </span>
-                          <span className="inline-block min-w-[104px] whitespace-nowrap text-xs text-white font-semibold tabular-nums">
-                            {fmtWon(accountData.account.balance)}{" "}
-                            KRW
+                          <span className="inline-block whitespace-nowrap text-xs text-white font-semibold tabular-nums">
+                            {fmtWon(accountData.account.balance)} KRW
                           </span>
                         </div>
-                        <div className="w-px bg-[#3b3f46]" />
-                        <div className="flex min-w-0 flex-col gap-0.5">
+                        <div className="flex min-w-0 flex-col gap-1">
                           <span className="text-[10px] text-zinc-500">
-                            사용가능
+                            주문가능금액
                           </span>
-                          <span className="inline-block min-w-[104px] whitespace-nowrap text-xs text-[#0ecb81] font-semibold tabular-nums">
-                            {fmtWon(accountData.account.availableBalance)}{" "}
-                            KRW
+                          <span className="inline-block whitespace-nowrap text-xs text-zinc-200 font-semibold tabular-nums">
+                            {fmtWon(accountData.account.availableBalance)} KRW
                           </span>
                         </div>
-                      </div>
+                      </>
                     )}
+                    <div className="ml-auto flex flex-col items-end gap-1 shrink-0">
+                      <span className="text-[10px] text-zinc-500">
+                        현재 계좌
+                      </span>
+                      <select
+                        value={selectedAccount?.id ?? ""}
+                        onChange={(e) => {
+                          const account = accounts.find(
+                            (a) => a.id === Number(e.target.value),
+                          );
+                          if (account) setSelectedAccount(account);
+                        }}
+                        className="bg-transparent text-white text-xs px-3 py-1 rounded-lg border border-[#3b3f46] outline-none w-fit"
+                      >
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.accountNumber}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <table className="w-full min-w-[760px] table-fixed text-xs">
+                  <table className="w-full min-w-126.25 table-fixed text-xs">
+                    {/* 각 컬럼 실측 내용 폭을 기준으로 남는 공간을 8개 컬럼에 균등 배분한 비율 */}
                     <colgroup>
-                      <col className="w-[18%]" />
-                      <col className="w-[10%]" />
-                      <col className="w-[10%]" />
-                      <col className="w-[12%]" />
-                      <col className="w-[12%]" />
-                      <col className="w-[15%]" />
-                      <col className="w-[10%]" />
-                      <col className="w-[13%]" />
+                      <col className="w-[16.7%]" />
+                      <col className="w-[8.95%]" />
+                      <col className="w-[8.95%]" />
+                      <col className="w-[12.65%]" />
+                      <col className="w-[12.65%]" />
+                      <col className="w-[14.75%]" />
+                      <col className="w-[11.6%]" />
+                      <col className="w-[13.75%]" />
                     </colgroup>
                     <thead className="text-zinc-500 border-b border-[#2b2f36]">
                       <tr>
@@ -296,15 +366,22 @@ export function TradingPage() {
                         return (
                           <tr
                             key={stock.stock.id}
-                            onClick={() => { if (stock.stock.id !== stockId) setStockId(stock.stock.id); }}
-                            className={`border-b border-[#2b2f36] cursor-pointer hover:bg-[#2b2f36] transition-colors ${stock.stock.id === stockId ? "bg-[#23272f]" : ""}`}
+                            onClick={() => {
+                              if (stock.stock.id !== stockId)
+                                setStockId(stock.stock.id);
+                            }}
+                            className={`border-b border-[#2b2f36] cursor-pointer hover:bg-[#2b2f36] transition-colors ${stock.stock.id === stockId ? "bg-[#1f232b]" : ""}`}
                           >
-                            <td className="py-2 pr-2 truncate">{stock.stock.name}</td>
+                            <td className="py-2 pr-2 truncate">
+                              {stock.stock.name}
+                            </td>
                             <td className="text-right py-2 tabular-nums">
                               {qty.toLocaleString("ko-KR")}
                             </td>
                             <td className="text-right py-2 tabular-nums">
-                              {Number(stock.availableQuantity).toLocaleString("ko-KR")}
+                              {Number(stock.availableQuantity).toLocaleString(
+                                "ko-KR",
+                              )}
                             </td>
                             <td className="text-right py-2 tabular-nums">
                               {avg.toLocaleString("ko-KR")}
@@ -317,11 +394,15 @@ export function TradingPage() {
                                 "ko-KR",
                               )}
                             </td>
-                            <td className={`text-right py-2 tabular-nums ${color}`}>
+                            <td
+                              className={`text-right py-2 tabular-nums ${color}`}
+                            >
                               {rate > 0 ? "+" : ""}
                               {rate.toFixed(2)}%
                             </td>
-                            <td className={`text-right py-2 tabular-nums ${color}`}>
+                            <td
+                              className={`text-right py-2 tabular-nums ${color}`}
+                            >
                               {amount > 0 ? "+" : ""}
                               {amount.toLocaleString("ko-KR")}
                             </td>
@@ -332,7 +413,7 @@ export function TradingPage() {
                         <tr>
                           <td
                             colSpan={8}
-                            className="py-4 text-center text-zinc-500"
+                            className="pt-12 pb-4 text-center text-zinc-500"
                           >
                             보유 종목이 없습니다
                           </td>
@@ -394,7 +475,7 @@ export function TradingPage() {
                       <tr>
                         <td
                           colSpan={8}
-                          className="py-4 text-center text-zinc-500"
+                          className="pt-12 pb-4 text-center text-zinc-500"
                         >
                           체결 내역이 없습니다
                         </td>
@@ -425,7 +506,7 @@ export function TradingPage() {
                         <tr
                           key={order.id}
                           onClick={() => selectOrder(order)}
-                          className={`border-b border-[#2b2f36] cursor-pointer transition-colors ${isSelected ? "bg-[#2b2f36]" : "hover:bg-[#1f2230]"}`}
+                          className={`border-b border-[#2b2f36] cursor-pointer transition-colors ${isSelected ? "bg-[#2b2f36]" : "hover:bg-[#1f232b]"}`}
                         >
                           <td className="py-2">{order.id}</td>
                           <td className="py-2">{order.stockName}</td>
@@ -447,7 +528,8 @@ export function TradingPage() {
                           </td>
                           <td className="text-right py-2">
                             {(
-                              Number(order.quantity) - Number(order.filledQuantity)
+                              Number(order.quantity) -
+                              Number(order.filledQuantity)
                             ).toLocaleString("ko-KR")}
                           </td>
                           <td className="text-right py-2 text-zinc-400">
@@ -460,12 +542,11 @@ export function TradingPage() {
                         </tr>
                       );
                     })}
-                    {(!orderData ||
-                      orderData.openOrders.length === 0) && (
+                    {(!orderData || orderData.openOrders.length === 0) && (
                       <tr>
                         <td
                           colSpan={8}
-                          className="py-4 text-center text-zinc-500"
+                          className="pt-12 pb-4 text-center text-zinc-500"
                         >
                           미체결 내역이 없습니다
                         </td>
@@ -474,19 +555,25 @@ export function TradingPage() {
                   </tbody>
                 </table>
               )}
+
+              {accountTab === "송금" && (
+                <div className="w-full py-12 text-center text-zinc-500 text-sm">
+                  아직 지원하지 않는 기능입니다
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* 중: 호가창 */}
-        <div className="w-[30%] p-2">
+        {/* 중: 호가창 (기존 렌더 폭 유지) */}
+        <div className="w-[calc(30%-16px)] shrink-0">
           <OrderBook stockId={stockId} />
         </div>
 
         {/* 우: 주문 + 등락률 */}
-        <div className="w-[20%] flex flex-col p-2 gap-2">
-          <div className="h-[55%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
-            <div className="flex items-center gap-3 mb-4 shrink-0 border-b border-[#2b2f36] pb-3">
+        <div className="flex-2 min-w-0 flex flex-col gap-2.5">
+          <div className="flex-55 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
+            <div className="flex items-center gap-3 mb-4 shrink-0 pb-3">
               <button
                 onClick={() => setOrderType("매수")}
                 className={`text-sm ${orderType === "매수" ? "text-[#f6465d] font-bold" : "text-zinc-400"}`}
@@ -517,7 +604,7 @@ export function TradingPage() {
             <div className="flex flex-col gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0">
               {(orderType === "매수" || orderType === "매도") && (
                 <>
-                  <div>
+                  <div className="shrink-0">
                     <label className="text-xs text-zinc-500 mb-1 block">
                       주문계좌
                     </label>
@@ -529,7 +616,7 @@ export function TradingPage() {
                         );
                         if (account) setSelectedAccount(account);
                       }}
-                      className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
+                      className="w-full bg-[#1f232b] text-white text-xs px-3 py-2 rounded-lg outline-none"
                     >
                       {accounts.map((a) => (
                         <option key={a.id} value={a.id}>
@@ -539,20 +626,20 @@ export function TradingPage() {
                     </select>
                   </div>
 
-                  <div>
+                  <div className="shrink-0">
                     <label className="text-xs text-zinc-500 mb-1 block">
                       주문유형
                     </label>
                     <div className="flex gap-2">
                       <button
                         onClick={() => setPriceType("지정가")}
-                        className={`flex-1 py-2 text-xs rounded-lg ${priceType === "지정가" ? "bg-[#2b2f36] text-white border border-[#3b3f46]" : "bg-transparent text-zinc-400 border border-[#2b2f36]"}`}
+                        className={`flex-1 py-2 text-xs rounded-lg ${priceType === "지정가" ? "bg-[#1f232b] text-white font-semibold" : "bg-transparent text-zinc-500 hover:text-zinc-300"}`}
                       >
                         지정가
                       </button>
                       <button
                         onClick={() => setPriceType("시장가")}
-                        className={`flex-1 py-2 text-xs rounded-lg ${priceType === "시장가" ? "bg-[#2b2f36] text-white border border-[#3b3f46]" : "bg-transparent text-zinc-400 border border-[#2b2f36]"}`}
+                        className={`flex-1 py-2 text-xs rounded-lg ${priceType === "시장가" ? "bg-[#1f232b] text-white font-semibold" : "bg-transparent text-zinc-500 hover:text-zinc-300"}`}
                       >
                         시장가
                       </button>
@@ -560,34 +647,27 @@ export function TradingPage() {
                   </div>
 
                   {priceType === "지정가" && (
-                    <div>
-                      <label className="text-xs text-zinc-500 mb-1 block">
-                        가격
-                      </label>
-                      <input
-                        type="number"
-                        placeholder="0"
+                    <div className="shrink-0">
+                      <StepperInput
+                        label="주문가격"
                         value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
+                        onChange={setPrice}
+                        onStep={stepPrice}
+                        hint={`호가 단위 ${getTickSize(parseInt(price) || 0).toLocaleString("ko-KR")}원`}
                       />
                     </div>
                   )}
 
-                  <div>
-                    <label className="text-xs text-zinc-500 mb-1 block">
-                      수량
-                    </label>
-                    <input
-                      type="number"
-                      placeholder="0"
+                  <div className="shrink-0">
+                    <StepperInput
+                      label="주문수량"
                       value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                      className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none"
+                      onChange={setQuantity}
+                      onStep={(current, dir) => Math.max(0, current + dir)}
                     />
                   </div>
 
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 shrink-0">
                     {[10, 25, 50, 100].map((pct) => (
                       <button
                         key={pct}
@@ -597,24 +677,29 @@ export function TradingPage() {
                               ? parseInt(price)
                               : parseFloat(data?.stockInfo?.upperLimit ?? "0");
                           if (orderType === "매수") {
-                            const balance = accountData?.account?.balance ?? "0";
+                            const balance =
+                              accountData?.account?.balance ?? "0";
                             if (orderPrice > 0)
                               setQuantity(
                                 String(
-                                  BigInt(balance) * BigInt(pct) / 100n / BigInt(orderPrice),
+                                  (BigInt(balance) * BigInt(pct)) /
+                                    100n /
+                                    BigInt(orderPrice),
                                 ),
                               );
                           } else {
                             const holding = accountData?.holdings?.find(
                               (s) => s.stock.id === stockId,
                             );
-                            const canSell = parseInt(holding?.availableQuantity ?? "0");
+                            const canSell = parseInt(
+                              holding?.availableQuantity ?? "0",
+                            );
                             setQuantity(
                               String(Math.floor((canSell * pct) / 100)),
                             );
                           }
                         }}
-                        className="flex-1 py-1 text-[10px] rounded bg-[#2b2f36] text-zinc-400 hover:text-white"
+                        className="flex-1 py-1 text-[10px] rounded-md bg-[#1f232b] text-zinc-400 hover:text-white"
                       >
                         {pct}%
                       </button>
@@ -634,7 +719,7 @@ export function TradingPage() {
               {orderType === "정정" &&
                 (selectedOrder ? (
                   <>
-                    <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex flex-col gap-1.5">
+                    <div className="px-3 py-2 bg-[#1f232b] rounded-lg text-xs flex flex-col gap-1.5 shrink-0">
                       <div className="flex justify-between">
                         <span className="text-zinc-400">주문 ID</span>
                         <span className="text-white">#{selectedOrder.id}</span>
@@ -666,16 +751,13 @@ export function TradingPage() {
                         </span>
                       </div>
                     </div>
-                    <div>
-                      <label className="text-xs text-zinc-500 mb-1 block">
-                        정정 가격
-                      </label>
-                      <input
-                        type="number"
-                        placeholder="0"
+                    <div className="shrink-0">
+                      <StepperInput
+                        label="정정 가격"
                         value={amendPrice}
-                        onChange={(e) => setAmendPrice(e.target.value)}
-                        className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B]"
+                        onChange={setAmendPrice}
+                        onStep={stepPrice}
+                        hint={`호가 단위 ${getTickSize(parseInt(amendPrice) || 0).toLocaleString("ko-KR")}원`}
                       />
                     </div>
                     <button
@@ -695,7 +777,7 @@ export function TradingPage() {
               {orderType === "취소" &&
                 (selectedOrder ? (
                   <>
-                    <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex flex-col gap-1.5">
+                    <div className="px-3 py-2 bg-[#1f232b] rounded-lg text-xs flex flex-col gap-1.5 shrink-0">
                       <div className="flex justify-between">
                         <span className="text-zinc-400">주문 ID</span>
                         <span className="text-white">#{selectedOrder.id}</span>
@@ -723,7 +805,9 @@ export function TradingPage() {
                       <div className="flex justify-between">
                         <span className="text-zinc-400">수량</span>
                         <span className="text-white">
-                          {Number(selectedOrder.quantity).toLocaleString("ko-KR")}
+                          {Number(selectedOrder.quantity).toLocaleString(
+                            "ko-KR",
+                          )}
                           주
                         </span>
                       </div>
@@ -741,7 +825,7 @@ export function TradingPage() {
                     <button
                       onClick={handleCancel}
                       disabled={cancelLoading}
-                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-transparent border border-[#f6465d] text-[#f6465d] hover:bg-[#f6465d]/10 shrink-0"
+                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#f6465d] hover:bg-[#e03650] text-white shrink-0"
                     >
                       {cancelLoading ? "처리중..." : "주문 취소 확인"}
                     </button>
@@ -754,7 +838,7 @@ export function TradingPage() {
             </div>
           </div>
 
-          <div className="h-[45%] bg-[#181a20] rounded-2xl p-4 flex flex-col">
+          <div className="flex-45 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
             <div className="text-sm text-zinc-400 mb-3">실시간 등락률</div>
             <div className="flex-1 overflow-auto scrollbar-thin">
               <table className="w-full text-xs">
@@ -768,35 +852,32 @@ export function TradingPage() {
                 </thead>
                 <tbody className="text-white">
                   {stocks.map((stock, i) => {
-                      const per = stock.changeRate;
-                      const color =
-                        per > 0
-                          ? "text-[#f6465d]"
-                          : per < 0
-                            ? "text-[#2563eb]"
-                            : "text-white";
-                      return (
-                        <tr
-                          key={stock.id}
-                          className="border-b border-[#2b2f36]"
-                        >
-                          <td className="py-1.5">{i + 1}</td>
-                          <td className="py-1.5">{stock.name}</td>
-                          <td className="text-right py-1.5">
-                            {Number(stock.price).toLocaleString("ko-KR")}
-                          </td>
-                          <td className={`text-right py-1.5 ${color}`}>
-                            {per > 0 ? "+" : ""}
-                            {per.toFixed(2)}%
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    const per = stock.changeRate;
+                    const color =
+                      per > 0
+                        ? "text-[#f6465d]"
+                        : per < 0
+                          ? "text-[#2563eb]"
+                          : "text-white";
+                    return (
+                      <tr key={stock.id} className="border-b border-[#2b2f36]">
+                        <td className="py-1.5">{i + 1}</td>
+                        <td className="py-1.5">{stock.name}</td>
+                        <td className="text-right py-1.5">
+                          {Number(stock.price).toLocaleString("ko-KR")}
+                        </td>
+                        <td className={`text-right py-1.5 ${color}`}>
+                          {per > 0 ? "+" : ""}
+                          {per.toFixed(2)}%
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {stocks.length === 0 && (
                     <tr>
                       <td
                         colSpan={4}
-                        className="py-4 text-center text-zinc-500"
+                        className="pt-12 pb-4 text-center text-zinc-500"
                       >
                         종목 데이터 없음
                       </td>
@@ -808,154 +889,6 @@ export function TradingPage() {
           </div>
         </div>
       </div>
-
-      {/* 송금 플로팅 버튼 */}
-      <button
-        onClick={() => setShowTransfer(true)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 bg-[#F59E0B] hover:bg-[#D97706] text-gray-900 font-bold text-sm rounded-full shadow-lg transition-colors"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12 2v20M2 12h20" />
-        </svg>
-        송금
-      </button>
-
-      {/* 송금 모달 */}
-      {showTransfer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/60"
-            onClick={() => setShowTransfer(false)}
-          />
-          <div className="relative bg-[#181a20] rounded-2xl p-6 w-80 border border-[#2b2f36] shadow-2xl">
-            <div className="flex items-center justify-between mb-5">
-              <span className="text-white font-bold text-base">송금</span>
-              <button
-                onClick={() => setShowTransfer(false)}
-                className="text-zinc-500 hover:text-white transition-colors"
-              >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                >
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              <div>
-                <label className="text-xs text-zinc-500 mb-1.5 block">
-                  보내는 계좌
-                </label>
-                <select
-                  value={selectedAccount?.id ?? ""}
-                  onChange={(e) => {
-                    const account = accounts.find(
-                      (a) => a.id === Number(e.target.value),
-                    );
-                    if (account) setSelectedAccount(account);
-                  }}
-                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2.5 rounded-lg border border-[#3b3f46] outline-none"
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.accountNumber}
-                    </option>
-                  ))}
-                </select>
-                {accountData?.account && (
-                  <p className="text-[10px] text-zinc-500 mt-1 px-1">
-                    사용 가능:{" "}
-                    <span className="text-[#0ecb81]">
-                      {fmtWon(accountData.account.availableBalance)}{" "}
-                      KRW
-                    </span>
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-500 mb-1.5 block">
-                  받는 계좌번호
-                </label>
-                <input
-                  type="number"
-                  placeholder="계좌번호 입력"
-                  value={transferTo}
-                  onChange={(e) => setTransferTo(e.target.value)}
-                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2.5 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B]"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-500 mb-1.5 block">
-                  금액
-                </label>
-                <input
-                  type="number"
-                  placeholder="0"
-                  value={transferAmount}
-                  onChange={(e) => setTransferAmount(e.target.value)}
-                  className="w-full bg-[#2b2f36] text-white text-xs px-3 py-2.5 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B]"
-                />
-                <div className="flex gap-1 mt-2">
-                  {[10000, 50000, 100000].map((amt) => (
-                    <button
-                      key={amt}
-                      onClick={() =>
-                        setTransferAmount((prev) =>
-                          String((parseInt(prev) || 0) + amt),
-                        )
-                      }
-                      className="flex-1 py-1.5 text-[10px] rounded bg-[#2b2f36] text-zinc-400 hover:text-white transition-colors"
-                    >
-                      +{(amt / 10000).toLocaleString("ko-KR")}만
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setTransferAmount("")}
-                    className="px-2 py-1.5 text-[10px] rounded bg-[#2b2f36] text-zinc-400 hover:text-white transition-colors"
-                  >
-                    초기화
-                  </button>
-                </div>
-              </div>
-
-              {transferAmount && parseInt(transferAmount) > 0 && (
-                <div className="px-3 py-2 bg-[#2b2f36] rounded-lg text-xs flex justify-between">
-                  <span className="text-zinc-400">송금 금액</span>
-                  <span className="text-white font-semibold">
-                    {parseInt(transferAmount).toLocaleString("ko-KR")} KRW
-                  </span>
-                </div>
-              )}
-
-              <button
-                onClick={handleTransfer}
-                disabled={transferLoading}
-                className="w-full py-3 rounded-lg text-sm font-bold bg-[#F59E0B] hover:bg-[#D97706] text-gray-900 disabled:opacity-50 transition-colors"
-              >
-                {transferLoading ? "처리중..." : "송금하기"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {toast && (
         <div
