@@ -7,7 +7,7 @@ import {
   LineSeries,
   CrosshairMode,
 } from "lightweight-charts";
-import type { IChartApi, ISeriesApi } from "lightweight-charts";
+import type { IChartApi, ISeriesApi, LogicalRange } from "lightweight-charts";
 import { io, Socket } from "socket.io-client";
 import { apiClient } from "../../services/api/client";
 import { REALTIME_URL } from "../../constants";
@@ -43,6 +43,7 @@ interface CandleItem {
 interface ChartApiResponse {
   candles: CandleItem[];
   lastCandleTime: string;
+  nextCursor: string | null;
 }
 
 interface ParsedCandle {
@@ -110,6 +111,8 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
   // 캔들 데이터 저장소
   const candleMapRef = useRef<Map<string, ParsedCandle>>(new Map()); // key: candleTime(ISO)
   const sortedRef = useRef<ParsedCandle[]>([]); // 시간순 정렬 배열 (시리즈 업데이트용)
+  const nextCursorRef = useRef<string | null>(null); // 다음(과거) 페이지 커서, 없으면 null
+  const loadingMoreRef = useRef(false); // 과거 데이터 중복 요청 방지
   const socketRef = useRef<Socket | null>(null);
   const [chartType, setChartType] = useState<ChartType>("1d");
 
@@ -306,6 +309,8 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
 
     candleMapRef.current.clear();
     sortedRef.current = [];
+    nextCursorRef.current = null;
+    loadingMoreRef.current = false;
 
     // 전체 데이터를 정렬 후 모든 시리즈에 setData
     const applyAllData = () => {
@@ -436,6 +441,37 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       });
     };
 
+    // 과거 데이터 추가 로드 (왼쪽 끝 스크롤 시 subscribeVisibleLogicalRangeChange에서 호출)
+    const loadMoreHistory = async () => {
+      if (loadingMoreRef.current || !nextCursorRef.current) return;
+      loadingMoreRef.current = true;
+      try {
+        const cursor = encodeURIComponent(nextCursorRef.current);
+        const res = await apiClient.get<ChartApiResponse>(
+          `/stocks/${stockId}/chart?type=${chartType}&cursor=${cursor}`
+        );
+        if (!active || !res.success || !res.data) return;
+
+        for (const c of res.data.candles) {
+          candleMapRef.current.set(c.candleTime, parseCandle(c, chartType));
+        }
+        nextCursorRef.current = res.data.nextCursor;
+        applyAllData();
+      } finally {
+        loadingMoreRef.current = false;
+      }
+    };
+
+    // 차트 왼쪽 끝에 근접하면(barsBefore < 10) 과거 데이터 추가 로드
+    const handleVisibleRangeChange = (logicalRange: LogicalRange | null) => {
+      if (!logicalRange) return;
+      const barsInfo = candleSeries.barsInLogicalRange(logicalRange);
+      if (barsInfo !== null && barsInfo.barsBefore < 10) {
+        loadMoreHistory();
+      }
+    };
+    chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+
     const init = async () => {
       candleMapRef.current.clear();
       sortedRef.current = [];
@@ -447,6 +483,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
           candleMapRef.current.set(c.candleTime, parseCandle(c, chartType));
         }
         lastCandleTime = res.data.lastCandleTime;
+        nextCursorRef.current = res.data.nextCursor;
         applyAllData();
       }
 
@@ -458,6 +495,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
 
     return () => {
       active = false;
+      chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
       if (socketRef.current) {
         socketRef.current.emit("leaveChartRoom", { stockId, type: chartType });
         socketRef.current.disconnect();
