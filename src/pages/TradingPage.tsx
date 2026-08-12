@@ -16,6 +16,8 @@ interface StockItem {
 }
 
 const fmtWon = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+const fmtTime = (value?: string) =>
+  value ? new Date(value).toLocaleTimeString("ko-KR") : "-";
 
 type OrderTypeTab = "매수" | "매도" | "정정" | "취소";
 type AccountTab = "계좌" | "체결" | "미체결" | "송금";
@@ -435,7 +437,8 @@ export function TradingPage() {
                       <th className="text-right py-2">주문수량</th>
                       <th className="text-right py-2">체결수량</th>
                       <th className="text-right py-2">주문가격</th>
-                      <th className="text-right py-2">접수시간</th>
+                      <th className="text-right py-2">접수시각</th>
+                      <th className="text-right py-2">전량체결 시각</th>
                     </tr>
                   </thead>
                   <tbody className="text-white">
@@ -463,11 +466,14 @@ export function TradingPage() {
                             : Number(order.price).toLocaleString("ko-KR")}
                         </td>
                         <td className="text-right py-2 text-zinc-400">
-                          {order.createdAt
-                            ? new Date(order.createdAt).toLocaleTimeString(
-                                "ko-KR",
-                              )
-                            : "-"}
+                          {fmtTime(order.createdAt)}
+                        </td>
+                        <td className="text-right py-2 text-zinc-400">
+                          {fmtTime(
+                            order.fullyFilledAt ??
+                              order.completedAt ??
+                              order.updatedAt,
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -496,7 +502,7 @@ export function TradingPage() {
                       <th className="text-right py-2">주문수량</th>
                       <th className="text-right py-2">주문가격</th>
                       <th className="text-right py-2">미체결</th>
-                      <th className="text-right py-2">접수시간</th>
+                      <th className="text-right py-2">접수시각</th>
                     </tr>
                   </thead>
                   <tbody className="text-white">
@@ -532,12 +538,8 @@ export function TradingPage() {
                               Number(order.filledQuantity)
                             ).toLocaleString("ko-KR")}
                           </td>
-                          <td className="text-right py-2 text-zinc-400">
-                            {order.createdAt
-                              ? new Date(order.createdAt).toLocaleTimeString(
-                                  "ko-KR",
-                                )
-                              : "-"}
+                        <td className="text-right py-2 text-zinc-400">
+                            {fmtTime(order.createdAt)}
                           </td>
                         </tr>
                       );

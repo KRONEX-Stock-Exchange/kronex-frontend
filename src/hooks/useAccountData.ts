@@ -34,6 +34,11 @@ export interface OrderItem {
     | "REJECTED"
     | "COMPLETED";
   createdAt?: string;
+  /** 주문 수량 전체가 체결된 시각. */
+  fullyFilledAt?: string;
+  /** 기존 API 호환용 완료 시각 필드. */
+  completedAt?: string;
+  updatedAt?: string;
 }
 
 export interface OrderData {

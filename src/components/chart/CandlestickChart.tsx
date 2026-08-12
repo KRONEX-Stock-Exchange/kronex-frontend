@@ -313,7 +313,8 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     loadingMoreRef.current = false;
 
     // 전체 데이터를 정렬 후 모든 시리즈에 setData
-    const applyAllData = () => {
+    // scrollToLatest: 과거 데이터 추가 로드(무한 스크롤) 시에는 false로 호출해 스크롤 위치 유지
+    const applyAllData = (scrollToLatest = true) => {
       const sorted = Array.from(candleMapRef.current.values()).sort((a, b) => {
         if (typeof a.chartTime === "number" && typeof b.chartTime === "number") {
           return a.chartTime - b.chartTime;
@@ -343,7 +344,9 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         );
       });
 
-      chartRef.current?.timeScale().scrollToRealTime();
+      if (scrollToLatest) {
+        chartRef.current?.timeScale().scrollToRealTime();
+      }
       // 자동 배율 범위 캡처 (줌인 한계 기준)
       requestAnimationFrame(() => {
         const cs = candleSeriesRef.current;
@@ -452,11 +455,23 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         );
         if (!active || !res.success || !res.data) return;
 
+        const prevBarCount = sortedRef.current.length;
+        const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange() ?? null;
+
         for (const c of res.data.candles) {
           candleMapRef.current.set(c.candleTime, parseCandle(c, chartType));
         }
         nextCursorRef.current = res.data.nextCursor;
-        applyAllData();
+        applyAllData(false);
+
+        // 과거 봉이 앞쪽에 추가되면서 밀린 만큼 logical range를 보정해 스크롤 위치 유지
+        const addedBars = sortedRef.current.length - prevBarCount;
+        if (visibleRange && addedBars > 0) {
+          chartRef.current?.timeScale().setVisibleLogicalRange({
+            from: visibleRange.from + addedBars,
+            to: visibleRange.to + addedBars,
+          });
+        }
       } finally {
         loadingMoreRef.current = false;
       }
