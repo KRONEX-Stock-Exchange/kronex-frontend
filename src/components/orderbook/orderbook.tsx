@@ -1,6 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { useOrderbook } from "../../hooks/useOrderbook";
-import type { StockInfo, OrderbookItem, MatchItem } from "../../hooks/useOrderbook";
+import type { OrderbookData, OrderbookItem, MatchItem, StockInfo } from "../../hooks/useOrderbook";
 import { Tick, EmptyTick } from "./tick";
 
 const toNum = (s: string | undefined | null) => {
@@ -11,7 +10,7 @@ const toNum = (s: string | undefined | null) => {
 const MAX_TICKS = 10; // 호가창 최대 행 수
 
 interface OrderBookProps {
-  stockId: number | null;
+  data: OrderbookData;
 }
 
 // 체결 현황 컴포넌트
@@ -110,8 +109,7 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
   );
 }
 
-export function OrderBook({ stockId }: OrderBookProps) {
-  const { data } = useOrderbook(stockId);
+export function OrderBook({ data }: OrderBookProps) {
   const prevSellRef = useRef<OrderbookItem[]>([]);
   const prevBuyRef = useRef<OrderbookItem[]>([]);
   const [sellDiffs, setSellDiffs] = useState<Map<string, number>>(new Map());

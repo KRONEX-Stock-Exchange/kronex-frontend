@@ -112,7 +112,7 @@ function StepperInput({
 export function TradingPage() {
   const [chartPanel, setChartPanel] = useState<HTMLDivElement | null>(null);
   const [stockId, setStockId] = useState<number | null>(null);
-  const { data } = useOrderbook(stockId);
+  const { data, loading: orderbookLoading } = useOrderbook(stockId);
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
   const { data: accountData, orderData } = useAccountData(
     selectedAccount?.id ?? null,
@@ -244,8 +244,12 @@ export function TradingPage() {
 
   const selectOrder = (order: OrderItem) => {
     setSelectedOrder(order);
-    setAmendPrice(order.price);
-    setOrderType("정정");
+    if (orderType === "매수" || orderType === "매도") {
+      setOrderType("정정");
+      setAmendPrice(order.price);
+    } else if (orderType === "정정") {
+      setAmendPrice(order.price);
+    }
   };
 
   return (
@@ -261,7 +265,12 @@ export function TradingPage() {
         />
       </div>
 
-      <div className="flex flex-1 min-h-0 gap-2.5 px-5 pt-2.5 pb-2.5">
+      <div className="relative flex flex-1 min-h-0 gap-2.5 px-5 pt-2.5 pb-2.5">
+        {orderbookLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0e0f13]/80 rounded-xl">
+            <div className="h-10 w-10 rounded-full border-4 border-[#2b2f36] border-t-[#F59E0B] animate-spin" />
+          </div>
+        )}
         {/* 좌: 차트 + 계좌 */}
         <div ref={setChartPanel} className="flex-5 min-w-0 min-h-0 flex flex-col gap-2.5">
           <div className="flex-52 min-h-0">
@@ -569,7 +578,7 @@ export function TradingPage() {
 
         {/* 중: 호가창 (기존 렌더 폭 유지) */}
         <div className="w-[calc(30%-16px)] shrink-0">
-          <OrderBook stockId={stockId} />
+          <OrderBook data={data} />
         </div>
 
         {/* 우: 주문 + 등락률 */}
@@ -603,182 +612,167 @@ export function TradingPage() {
               </button>
             </div>
 
-            <div className="flex flex-col gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0">
-              {(orderType === "매수" || orderType === "매도") && (
-                <>
-                  <div className="shrink-0">
-                    <label className="text-xs text-zinc-500 mb-1 block">
-                      주문계좌
-                    </label>
-                    <select
-                      value={selectedAccount?.id ?? ""}
-                      onChange={(e) => {
-                        const account = accounts.find(
-                          (a) => a.id === Number(e.target.value),
-                        );
-                        if (account) setSelectedAccount(account);
-                      }}
-                      className="w-full bg-[#1f232b] text-white text-xs px-3 py-2 rounded-lg outline-none"
-                    >
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.accountNumber}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="shrink-0">
-                    <label className="text-xs text-zinc-500 mb-1 block">
-                      주문유형
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setPriceType("지정가")}
-                        className={`flex-1 py-2 text-xs rounded-lg ${priceType === "지정가" ? "bg-[#1f232b] text-white font-semibold" : "bg-transparent text-zinc-500 hover:text-zinc-300"}`}
-                      >
-                        지정가
-                      </button>
-                      <button
-                        onClick={() => setPriceType("시장가")}
-                        className={`flex-1 py-2 text-xs rounded-lg ${priceType === "시장가" ? "bg-[#1f232b] text-white font-semibold" : "bg-transparent text-zinc-500 hover:text-zinc-300"}`}
-                      >
-                        시장가
-                      </button>
-                    </div>
-                  </div>
-
-                  {priceType === "지정가" && (
+            <div className="flex flex-col flex-1 min-h-0">
+              <div className="flex flex-col gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0">
+                {(orderType === "매수" || orderType === "매도") && (
+                  <>
                     <div className="shrink-0">
-                      <StepperInput
-                        label="주문가격"
-                        value={price}
-                        onChange={setPrice}
-                        onStep={stepPrice}
-                        hint={`호가 단위 ${getTickSize(parseInt(price) || 0).toLocaleString("ko-KR")}원`}
-                      />
-                    </div>
-                  )}
-
-                  <div className="shrink-0">
-                    <StepperInput
-                      label="주문수량"
-                      value={quantity}
-                      onChange={setQuantity}
-                      onStep={(current, dir) => Math.max(0, current + dir)}
-                    />
-                  </div>
-
-                  <div className="flex gap-1 shrink-0">
-                    {[10, 25, 50, 100].map((pct) => (
-                      <button
-                        key={pct}
-                        onClick={() => {
-                          const orderPrice =
-                            priceType === "지정가"
-                              ? parseInt(price)
-                              : parseFloat(data?.stockInfo?.upperLimit ?? "0");
-                          if (orderType === "매수") {
-                            const balance =
-                              accountData?.account?.balance ?? "0";
-                            if (orderPrice > 0)
-                              setQuantity(
-                                String(
-                                  (BigInt(balance) * BigInt(pct)) /
-                                    100n /
-                                    BigInt(orderPrice),
-                                ),
-                              );
-                          } else {
-                            const holding = accountData?.holdings?.find(
-                              (s) => s.stock.id === stockId,
-                            );
-                            const canSell = parseInt(
-                              holding?.availableQuantity ?? "0",
-                            );
-                            setQuantity(
-                              String(Math.floor((canSell * pct) / 100)),
-                            );
-                          }
+                      <label className="text-xs text-zinc-500 mb-1 block">
+                        주문계좌
+                      </label>
+                      <select
+                        value={selectedAccount?.id ?? ""}
+                        onChange={(e) => {
+                          const account = accounts.find(
+                            (a) => a.id === Number(e.target.value),
+                          );
+                          if (account) setSelectedAccount(account);
                         }}
-                        className="flex-1 py-1 text-[10px] rounded-md bg-[#1f232b] text-zinc-400 hover:text-white"
+                        className="w-full bg-[#1f232b] text-white text-xs px-3 py-2 rounded-lg outline-none"
                       >
-                        {pct}%
-                      </button>
-                    ))}
-                  </div>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.accountNumber}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <button
-                    onClick={handleOrder}
-                    disabled={orderLoading}
-                    className={`py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"}`}
-                  >
-                    {orderLoading ? "처리중..." : orderType}
-                  </button>
-                </>
-              )}
-
-              {orderType === "정정" &&
-                (selectedOrder ? (
-                  <>
-                    <div className="px-3 py-2 bg-[#1f232b] rounded-lg text-xs flex flex-col gap-1.5 shrink-0">
-                      <div className="flex justify-between">
-                        <span className="text-zinc-400">주문 ID</span>
-                        <span className="text-white">#{selectedOrder.id}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-400">종목</span>
-                        <span className="text-white">
-                          {selectedOrder.stockName}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-400">유형</span>
-                        <span
-                          className={
-                            selectedOrder.tradingType === "BUY"
-                              ? "text-[#f6465d]"
-                              : "text-[#2563eb]"
-                          }
+                    <div className="shrink-0">
+                      <label className="text-xs text-zinc-500 mb-1 block">
+                        주문유형
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setPriceType("지정가")}
+                          className={`flex-1 py-2 text-xs rounded-lg ${priceType === "지정가" ? "bg-[#1f232b] text-white font-semibold" : "bg-transparent text-zinc-500 hover:text-zinc-300"}`}
                         >
-                          {selectedOrder.tradingType === "BUY"
-                            ? "매수"
-                            : "매도"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-400">현재 가격</span>
-                        <span className="text-white">
-                          {Number(selectedOrder.price).toLocaleString("ko-KR")}
-                        </span>
+                          지정가
+                        </button>
+                        <button
+                          onClick={() => setPriceType("시장가")}
+                          className={`flex-1 py-2 text-xs rounded-lg ${priceType === "시장가" ? "bg-[#1f232b] text-white font-semibold" : "bg-transparent text-zinc-500 hover:text-zinc-300"}`}
+                        >
+                          시장가
+                        </button>
                       </div>
                     </div>
+
+                    {priceType === "지정가" && (
+                      <div className="shrink-0">
+                        <StepperInput
+                          label="주문가격"
+                          value={price}
+                          onChange={setPrice}
+                          onStep={stepPrice}
+                          hint={`호가 단위 ${getTickSize(parseInt(price) || 0).toLocaleString("ko-KR")}원`}
+                        />
+                      </div>
+                    )}
+
                     <div className="shrink-0">
                       <StepperInput
-                        label="정정 가격"
-                        value={amendPrice}
-                        onChange={setAmendPrice}
-                        onStep={stepPrice}
-                        hint={`호가 단위 ${getTickSize(parseInt(amendPrice) || 0).toLocaleString("ko-KR")}원`}
+                        label="주문수량"
+                        value={quantity}
+                        onChange={setQuantity}
+                        onStep={(current, dir) => Math.max(0, current + dir)}
                       />
                     </div>
-                    <button
-                      onClick={handleAmend}
-                      disabled={amendLoading}
-                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#F59E0B] text-gray-900 shrink-0"
-                    >
-                      {amendLoading ? "처리중..." : "정정 확인"}
-                    </button>
-                  </>
-                ) : (
-                  <p className="text-xs text-zinc-500 text-center py-6">
-                    미체결 탭에서 주문을 선택하세요
-                  </p>
-                ))}
 
-              {orderType === "취소" &&
-                (selectedOrder ? (
-                  <>
+                    <div className="flex gap-1 shrink-0">
+                      {[10, 25, 50, 100].map((pct) => (
+                        <button
+                          key={pct}
+                          onClick={() => {
+                            const orderPrice =
+                              priceType === "지정가"
+                                ? parseInt(price)
+                                : parseFloat(data?.stockInfo?.upperLimit ?? "0");
+                            if (orderType === "매수") {
+                              const balance =
+                                accountData?.account?.balance ?? "0";
+                              if (orderPrice > 0)
+                                setQuantity(
+                                  String(
+                                    (BigInt(balance) * BigInt(pct)) /
+                                      100n /
+                                      BigInt(orderPrice),
+                                  ),
+                                );
+                            } else {
+                              const holding = accountData?.holdings?.find(
+                                (s) => s.stock.id === stockId,
+                              );
+                              const canSell = parseInt(
+                                holding?.availableQuantity ?? "0",
+                              );
+                              setQuantity(
+                                String(Math.floor((canSell * pct) / 100)),
+                              );
+                            }
+                          }}
+                          className="flex-1 py-1 text-[10px] rounded-md bg-[#1f232b] text-zinc-400 hover:text-white"
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {orderType === "정정" &&
+                  (selectedOrder ? (
+                    <>
+                      <div className="px-3 py-2 bg-[#1f232b] rounded-lg text-xs flex flex-col gap-1.5 shrink-0">
+                        <div className="flex justify-between">
+                          <span className="text-zinc-400">주문 ID</span>
+                          <span className="text-white">#{selectedOrder.id}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-400">종목</span>
+                          <span className="text-white">
+                            {selectedOrder.stockName}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-400">유형</span>
+                          <span
+                            className={
+                              selectedOrder.tradingType === "BUY"
+                                ? "text-[#f6465d]"
+                                : "text-[#2563eb]"
+                            }
+                          >
+                            {selectedOrder.tradingType === "BUY"
+                              ? "매수"
+                              : "매도"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-400">현재 가격</span>
+                          <span className="text-white">
+                            {Number(selectedOrder.price).toLocaleString("ko-KR")}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        <StepperInput
+                          label="정정 가격"
+                          value={amendPrice}
+                          onChange={setAmendPrice}
+                          onStep={stepPrice}
+                          hint={`호가 단위 ${getTickSize(parseInt(amendPrice) || 0).toLocaleString("ko-KR")}원`}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-zinc-500 text-center py-6">
+                      미체결 탭에서 주문을 선택하세요
+                    </p>
+                  ))}
+
+                {orderType === "취소" &&
+                  (selectedOrder ? (
                     <div className="px-3 py-2 bg-[#1f232b] rounded-lg text-xs flex flex-col gap-1.5 shrink-0">
                       <div className="flex justify-between">
                         <span className="text-zinc-400">주문 ID</span>
@@ -824,19 +818,40 @@ export function TradingPage() {
                         </span>
                       </div>
                     </div>
-                    <button
-                      onClick={handleCancel}
-                      disabled={cancelLoading}
-                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#f6465d] hover:bg-[#e03650] text-white shrink-0"
-                    >
-                      {cancelLoading ? "처리중..." : "주문 취소 확인"}
-                    </button>
-                  </>
-                ) : (
-                  <p className="text-xs text-zinc-500 text-center py-6">
-                    미체결 탭에서 주문을 선택하세요
-                  </p>
-                ))}
+                  ) : (
+                    <p className="text-xs text-zinc-500 text-center py-6">
+                      미체결 탭에서 주문을 선택하세요
+                    </p>
+                  ))}
+              </div>
+
+              {(orderType === "매수" || orderType === "매도") && (
+                <button
+                  onClick={handleOrder}
+                  disabled={orderLoading}
+                  className={`mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"}`}
+                >
+                  {orderLoading ? "처리중..." : orderType}
+                </button>
+              )}
+              {orderType === "정정" && selectedOrder && (
+                <button
+                  onClick={handleAmend}
+                  disabled={amendLoading}
+                  className="mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#F59E0B] text-gray-900 shrink-0"
+                >
+                  {amendLoading ? "처리중..." : "정정 확인"}
+                </button>
+              )}
+              {orderType === "취소" && selectedOrder && (
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelLoading}
+                  className="mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#f6465d] hover:bg-[#e03650] text-white shrink-0"
+                >
+                  {cancelLoading ? "처리중..." : "주문 취소 확인"}
+                </button>
+              )}
             </div>
           </div>
 

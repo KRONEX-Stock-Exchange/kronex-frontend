@@ -41,12 +41,22 @@ export function useOrderbook(stockId: number | null) {
     sellOrderbookData: [],
     match: [],
   });
+  const [loading, setLoading] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     if (stockId === null) return;
     let active = true;
+
+    // 종목 전환 시 이전 종목 데이터가 잠깐씩 섞여 보이지 않도록 즉시 초기화
+    setData({
+      stockInfo: null,
+      buyOrderbookData: [],
+      sellOrderbookData: [],
+      match: [],
+    });
+    setLoading(true);
 
     const connect = () => {
       const newSocket = io(`${REALTIME_URL}/stock`, {
@@ -60,6 +70,7 @@ export function useOrderbook(stockId: number | null) {
 
       newSocket.on("stockInfoUpdated", (info: StockInfo) => {
         setData((prev) => ({ ...prev, stockInfo: info }));
+        setLoading(false);
       });
 
       newSocket.on("orderBookUpdated", ({ buyOrderbook, sellOrderbook }: { buyOrderbook: OrderbookItem[]; sellOrderbook: OrderbookItem[] }) => {
@@ -102,5 +113,5 @@ export function useOrderbook(stockId: number | null) {
     };
   }, [stockId]);
 
-  return { data, socket };
+  return { data, loading, socket };
 }
