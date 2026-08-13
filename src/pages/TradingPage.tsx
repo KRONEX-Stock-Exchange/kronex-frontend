@@ -19,6 +19,14 @@ const fmtWon = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const fmtTime = (value?: string) =>
   value ? new Date(value).toLocaleTimeString("ko-KR") : "-";
 
+const PERCENT_SNAP_POINTS = [0, 25, 50, 75, 100];
+const PERCENT_SNAP_THRESHOLD = 4;
+// 슬라이더 thumb(w-3.5 = 14px)의 중심은 트랙 양 끝에서 반지름만큼 안쪽에서 움직이므로
+// 눈금/채움 위치도 같은 공식으로 계산해야 thumb과 픽셀 단위로 어긋나지 않는다.
+const SLIDER_THUMB_SIZE = 14;
+const sliderThumbLeft = (pct: number) =>
+  `calc(${SLIDER_THUMB_SIZE / 2}px + (100% - ${SLIDER_THUMB_SIZE}px) * ${pct / 100})`;
+
 type OrderTypeTab = "매수" | "매도" | "정정" | "취소";
 type AccountTab = "계좌" | "체결" | "미체결" | "송금";
 
@@ -123,6 +131,7 @@ export function TradingPage() {
   const [priceType, setPriceType] = useState<"지정가" | "시장가">("지정가");
   const [price, setPrice] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [orderPercent, setOrderPercent] = useState(0);
   const [orderLoading, setOrderLoading] = useState(false);
   const [stocks, setStocks] = useState<StockItem[]>([]);
 
@@ -139,7 +148,10 @@ export function TradingPage() {
   // 종목이 바뀌면 주문가격을 그 종목의 현재가로 1회 초기화한다.
   // (렌더 중 상태 조정 패턴 — 이후 사용자가 입력한 값은 덮어쓰지 않는다)
   const [pricedStockId, setPricedStockId] = useState<number | null>(null);
-  const livePrice = data?.stockInfo?.price;
+  // 종목 전환 직후 첫 렌더에서는 useOrderbook의 초기화 effect가 아직 실행되지 않아
+  // data.stockInfo가 이전 종목의 값을 그대로 들고 있을 수 있으므로 id가 일치할 때만 신뢰한다.
+  const livePrice =
+    data?.stockInfo?.id === stockId ? data.stockInfo.price : undefined;
   if (stockId !== null && livePrice && pricedStockId !== stockId) {
     setPricedStockId(stockId);
     setPrice(String(Math.trunc(Number(livePrice))));
@@ -253,7 +265,7 @@ export function TradingPage() {
   };
 
   return (
-    <div className="flex flex-col h-full w-full">
+    <div className="relative flex flex-col h-full w-full">
       {/* 종목 선택 바는 거래 화면 전체 폭을 사용한다. */}
       <div className="shrink-0 px-5 pt-2.5">
         <StockHeader
@@ -265,14 +277,19 @@ export function TradingPage() {
         />
       </div>
 
-      <div className="relative flex flex-1 min-h-0 gap-2.5 px-5 pt-2.5 pb-2.5">
-        {orderbookLoading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0e0f13]/80 rounded-xl">
-            <div className="h-10 w-10 rounded-full border-4 border-[#2b2f36] border-t-[#F59E0B] animate-spin" />
-          </div>
-        )}
+      {/* 페이지 전체(상단 바 포함)를 덮는 로딩 오버레이. 퍼센트 슬라이더(z-20)보다 위에 있어야 뚫려 보이지 않는다. */}
+      <div
+        className={`absolute inset-0 z-40 flex items-center justify-center bg-[#0e0f13]/80 transition-opacity duration-300 ease-out ${orderbookLoading ? "opacity-100" : "pointer-events-none opacity-0"}`}
+      >
+        <div className="h-10 w-10 rounded-full border-4 border-[#2b2f36] border-t-[#F59E0B] animate-spin" />
+      </div>
+
+      <div className="flex flex-1 min-h-0 gap-2.5 px-5 pt-2.5 pb-2.5">
         {/* 좌: 차트 + 계좌 */}
-        <div ref={setChartPanel} className="flex-5 min-w-0 min-h-0 flex flex-col gap-2.5">
+        <div
+          ref={setChartPanel}
+          className="flex-5 min-w-0 min-h-0 flex flex-col gap-2.5"
+        >
           <div className="flex-52 min-h-0">
             <CandlestickChart stockId={stockId} />
           </div>
@@ -297,19 +314,19 @@ export function TradingPage() {
                   <div className="mb-3 flex items-center gap-6 pb-2.5">
                     {accountData?.account && (
                       <>
-                        <div className="flex min-w-0 flex-col gap-1">
-                          <span className="text-[10px] text-zinc-500">
+                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500">
                             보유 금액
                           </span>
-                          <span className="inline-block whitespace-nowrap text-xs text-white font-semibold tabular-nums">
+                          <span className="inline-block whitespace-nowrap text-xs leading-none text-white font-semibold tabular-nums pt-0.5">
                             {fmtWon(accountData.account.balance)} KRW
                           </span>
                         </div>
-                        <div className="flex min-w-0 flex-col gap-1">
-                          <span className="text-[10px] text-zinc-500">
+                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500">
                             주문가능금액
                           </span>
-                          <span className="inline-block whitespace-nowrap text-xs text-zinc-200 font-semibold tabular-nums">
+                          <span className="inline-block whitespace-nowrap text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
                             {fmtWon(accountData.account.availableBalance)} KRW
                           </span>
                         </div>
@@ -436,7 +453,18 @@ export function TradingPage() {
               )}
 
               {accountTab === "체결" && (
-                <table className="w-full text-xs">
+                <table className="w-full table-fixed text-xs">
+                  <colgroup>
+                    <col className="w-[9%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                  </colgroup>
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
                       <th className="text-left py-2">주문ID</th>
@@ -474,10 +502,10 @@ export function TradingPage() {
                             ? "-"
                             : Number(order.price).toLocaleString("ko-KR")}
                         </td>
-                        <td className="text-right py-2 text-zinc-400">
+                        <td className="text-right py-2 text-[11px] text-zinc-400 tabular-nums">
                           {fmtTime(order.createdAt)}
                         </td>
-                        <td className="text-right py-2 text-zinc-400">
+                        <td className="text-right py-2 text-[11px] text-zinc-400 tabular-nums">
                           {fmtTime(
                             order.fullyFilledAt ??
                               order.completedAt ??
@@ -501,7 +529,17 @@ export function TradingPage() {
               )}
 
               {accountTab === "미체결" && (
-                <table className="w-full text-xs">
+                <table className="w-full table-fixed text-xs">
+                  <colgroup>
+                    <col className="w-[9%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[15%]" />
+                  </colgroup>
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
                       <th className="text-left py-2">주문ID</th>
@@ -509,8 +547,8 @@ export function TradingPage() {
                       <th className="text-right py-2">유형</th>
                       <th className="text-right py-2">주문구분</th>
                       <th className="text-right py-2">주문수량</th>
+                      <th className="text-right py-2">체결수량</th>
                       <th className="text-right py-2">주문가격</th>
-                      <th className="text-right py-2">미체결</th>
                       <th className="text-right py-2">접수시각</th>
                     </tr>
                   </thead>
@@ -537,17 +575,14 @@ export function TradingPage() {
                             {Number(order.quantity).toLocaleString("ko-KR")}
                           </td>
                           <td className="text-right py-2">
+                            {Number(order.filledQuantity).toLocaleString("ko-KR")}
+                          </td>
+                          <td className="text-right py-2">
                             {order.orderType === "MARKET"
                               ? "-"
                               : Number(order.price).toLocaleString("ko-KR")}
                           </td>
-                          <td className="text-right py-2">
-                            {(
-                              Number(order.quantity) -
-                              Number(order.filledQuantity)
-                            ).toLocaleString("ko-KR")}
-                          </td>
-                        <td className="text-right py-2 text-zinc-400">
+                          <td className="text-right py-2 text-[11px] text-zinc-400 tabular-nums">
                             {fmtTime(order.createdAt)}
                           </td>
                         </tr>
@@ -583,8 +618,8 @@ export function TradingPage() {
 
         {/* 우: 주문 + 등락률 */}
         <div className="flex-2 min-w-0 flex flex-col gap-2.5">
-          <div className="flex-55 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
-            <div className="flex items-center gap-3 mb-4 shrink-0 pb-3">
+          <div className="flex-58 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
+            <div className="flex items-center gap-3 mb-2 shrink-0 pb-2">
               <button
                 onClick={() => setOrderType("매수")}
                 className={`text-sm ${orderType === "매수" ? "text-[#f6465d] font-bold" : "text-zinc-400"}`}
@@ -613,7 +648,7 @@ export function TradingPage() {
             </div>
 
             <div className="flex flex-col flex-1 min-h-0">
-              <div className="flex flex-col gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0">
+              <div className="flex flex-col gap-2 flex-1 overflow-y-auto scrollbar-thin min-h-0">
                 {(orderType === "매수" || orderType === "매도") && (
                   <>
                     <div className="shrink-0">
@@ -679,22 +714,35 @@ export function TradingPage() {
                       />
                     </div>
 
-                    <div className="flex gap-1 shrink-0">
-                      {[10, 25, 50, 100].map((pct) => (
-                        <button
-                          key={pct}
-                          onClick={() => {
+                    <div className="shrink-0 pt-1 pb-0.5">
+                      <div className="relative flex items-center h-3.5">
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={orderPercent}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            const pct =
+                              PERCENT_SNAP_POINTS.find(
+                                (p) =>
+                                  Math.abs(raw - p) <= PERCENT_SNAP_THRESHOLD,
+                              ) ?? raw;
+                            setOrderPercent(pct);
                             const orderPrice =
                               priceType === "지정가"
                                 ? parseInt(price)
-                                : parseFloat(data?.stockInfo?.upperLimit ?? "0");
+                                : parseFloat(
+                                    data?.stockInfo?.upperLimit ?? "0",
+                                  );
                             if (orderType === "매수") {
-                              const balance =
-                                accountData?.account?.balance ?? "0";
+                              const availableBalance =
+                                accountData?.account?.availableBalance ?? "0";
                               if (orderPrice > 0)
                                 setQuantity(
                                   String(
-                                    (BigInt(balance) * BigInt(pct)) /
+                                    (BigInt(availableBalance) * BigInt(pct)) /
                                       100n /
                                       BigInt(orderPrice),
                                   ),
@@ -711,11 +759,52 @@ export function TradingPage() {
                               );
                             }
                           }}
-                          className="flex-1 py-1 text-[10px] rounded-md bg-[#1f232b] text-zinc-400 hover:text-white"
-                        >
-                          {pct}%
-                        </button>
-                      ))}
+                          style={{
+                            background: `linear-gradient(to right, ${orderType === "매수" ? "#f6465d" : "#2563eb"} ${sliderThumbLeft(orderPercent)}, #2b2f36 ${sliderThumbLeft(orderPercent)})`,
+                          }}
+                          className="relative z-10 w-full h-1.5 rounded-full appearance-none cursor-pointer outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:cursor-pointer"
+                        />
+                        {PERCENT_SNAP_POINTS.map(
+                          (tick) =>
+                            orderPercent < tick && (
+                              <div
+                                key={tick}
+                                className="absolute top-1/2 z-20 -translate-y-1/2 -translate-x-1/2 pointer-events-none w-2 h-2 rounded-full"
+                                style={{
+                                  left: sliderThumbLeft(tick),
+                                  backgroundColor: "#54585f",
+                                }}
+                              />
+                            ),
+                        )}
+                      </div>
+                      <div className="relative h-3 mt-1">
+                        {PERCENT_SNAP_POINTS.map((tick) =>
+                          tick === 0 ? (
+                            <span
+                              key={tick}
+                              className="absolute left-0 text-[10px] text-zinc-500"
+                            >
+                              {tick}%
+                            </span>
+                          ) : tick === 100 ? (
+                            <span
+                              key={tick}
+                              className="absolute right-0 text-[10px] text-zinc-500"
+                            >
+                              {tick}%
+                            </span>
+                          ) : (
+                            <span
+                              key={tick}
+                              className="absolute -translate-x-1/2 text-[10px] text-zinc-500"
+                              style={{ left: sliderThumbLeft(tick) }}
+                            >
+                              {tick}%
+                            </span>
+                          ),
+                        )}
+                      </div>
                     </div>
                   </>
                 )}
@@ -726,7 +815,9 @@ export function TradingPage() {
                       <div className="px-3 py-2 bg-[#1f232b] rounded-lg text-xs flex flex-col gap-1.5 shrink-0">
                         <div className="flex justify-between">
                           <span className="text-zinc-400">주문 ID</span>
-                          <span className="text-white">#{selectedOrder.id}</span>
+                          <span className="text-white">
+                            #{selectedOrder.id}
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-zinc-400">종목</span>
@@ -751,7 +842,9 @@ export function TradingPage() {
                         <div className="flex justify-between">
                           <span className="text-zinc-400">현재 가격</span>
                           <span className="text-white">
-                            {Number(selectedOrder.price).toLocaleString("ko-KR")}
+                            {Number(selectedOrder.price).toLocaleString(
+                              "ko-KR",
+                            )}
                           </span>
                         </div>
                       </div>
@@ -826,13 +919,21 @@ export function TradingPage() {
               </div>
 
               {(orderType === "매수" || orderType === "매도") && (
-                <button
-                  onClick={handleOrder}
-                  disabled={orderLoading}
-                  className={`mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"}`}
-                >
-                  {orderLoading ? "처리중..." : orderType}
-                </button>
+                <>
+                  {priceType === "시장가" && (
+                    <div className="shrink-0 mt-3 text-[10px] leading-relaxed text-zinc-500">
+                      시장가 주문은 주문가격이 상한가/하한가로 지정되며, 체결할
+                      주문이 없을 시 남은 잔량은 자동으로 취소됩니다.
+                    </div>
+                  )}
+                  <button
+                    onClick={handleOrder}
+                    disabled={orderLoading}
+                    className={`mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"}`}
+                  >
+                    {orderLoading ? "처리중..." : orderType}
+                  </button>
+                </>
               )}
               {orderType === "정정" && selectedOrder && (
                 <button
@@ -855,7 +956,7 @@ export function TradingPage() {
             </div>
           </div>
 
-          <div className="flex-45 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
+          <div className="flex-42 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
             <div className="text-sm text-zinc-400 mb-3">실시간 등락률</div>
             <div className="flex-1 overflow-auto scrollbar-thin">
               <table className="w-full text-xs">
