@@ -86,6 +86,46 @@ type AccountTab = "계좌" | "체결" | "미체결" | "송금";
 type MarketTab = "실시간 등락률" | "랭킹";
 type AmountMode = "원본" | "간략";
 
+// 직전 스냅샷과 비교해 각 항목이 몇 계단 오르내렸는지 계산한다.
+// prevRanksRef가 null이면(첫 조회) 비교 기준이 없으므로 빈 Map을 돌려주고 기준만 세운다.
+// (두 목록 다 고정된 항목 집합이라 이전 스냅샷에 없던 키가 새로 나타날 일은 없다)
+function computeRankChanges<T, K>(
+  items: T[],
+  getKey: (item: T) => K,
+  getRank: (item: T, index: number) => number,
+  prevRanksRef: { current: Map<K, number> | null },
+): Map<K, number> {
+  const changes = new Map<K, number>();
+  const nextRanks = new Map<K, number>();
+  const prev = prevRanksRef.current;
+  items.forEach((item, i) => {
+    const key = getKey(item);
+    const rank = getRank(item, i);
+    nextRanks.set(key, rank);
+    const prevRank = prev?.get(key);
+    if (prevRank !== undefined) changes.set(key, prevRank - rank);
+  });
+  prevRanksRef.current = nextRanks;
+  return changes;
+}
+
+// 순위 옆에 붙는 변동 배지 (▲N/▼N/변동없음)
+function RankBadge({ change }: { change: number | undefined }) {
+  if (change === undefined) return null;
+  const base =
+    "inline-flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[10px] font-bold leading-none";
+  if (change === 0) return <span className={`${base} text-zinc-500`}>–</span>;
+  const up = change > 0;
+  return (
+    <span
+      className={`${base} ${up ? "text-[#f6465d] bg-[#f6465d]/15" : "text-[#2563eb] bg-[#2563eb]/15"}`}
+    >
+      {up ? "▲" : "▼"}
+      {Math.abs(change)}
+    </span>
+  );
+}
+
 // 계좌 요약에서 현금 항목과 평가 항목을 구분하는 세로 구분자
 function GroupDivider() {
   return (
@@ -255,6 +295,11 @@ export function TradingPage() {
   const [orderPercent, setOrderPercent] = useState(0);
   const [orderLoading, setOrderLoading] = useState(false);
   const [stocks, setStocks] = useState<StockItem[]>([]);
+  const [stocksLoading, setStocksLoading] = useState(true);
+  const stockRanksRef = useRef<Map<number, number> | null>(null);
+  const [stockRankChanges, setStockRankChanges] = useState<Map<number, number>>(
+    new Map(),
+  );
 
   const [toast, setToast] = useState<ToastData | null>(null);
   const [toastLeaving, setToastLeaving] = useState(false);
@@ -275,6 +320,10 @@ export function TradingPage() {
   const [amountMode, setAmountMode] = useState<AmountMode>("원본");
   const [rankings, setRankings] = useState<RankingItem[] | null>(null);
   const [rankingLoading, setRankingLoading] = useState(false);
+  const rankingRanksRef = useRef<Map<string, number> | null>(null);
+  const [rankingRankChanges, setRankingRankChanges] = useState<
+    Map<string, number>
+  >(new Map());
 
   // 계좌 패널 스크롤이 바닥에 가까워지면 현재 탭(체결/미체결)의 다음 페이지를 불러옴
   const handleAccountPanelScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -330,8 +379,17 @@ export function TradingPage() {
       const response = await apiClient.get<StockItem[]>("/stocks");
       if (response.success && response.data) {
         setStocks(response.data);
+        setStockRankChanges(
+          computeRankChanges(
+            response.data,
+            (s) => s.id,
+            (_s, i) => i + 1,
+            stockRanksRef,
+          ),
+        );
         setStockId((prev) => prev ?? response.data![0]?.id ?? null);
       }
+      setStocksLoading(false);
     };
     fetchStocks();
     const interval = setInterval(fetchStocks, 30000);
@@ -349,8 +407,16 @@ export function TradingPage() {
           `/rankings/assets?page=1&size=${RANKING_TOP_N}`,
         );
         if (canceled) return;
-        setRankings(
-          response.success && response.data ? response.data.rankings : [],
+        const list =
+          response.success && response.data ? response.data.rankings : [];
+        setRankings(list);
+        setRankingRankChanges(
+          computeRankChanges(
+            list,
+            (r) => r.username,
+            (r) => r.rank,
+            rankingRanksRef,
+          ),
         );
       } catch {
         if (canceled) return;
@@ -1473,7 +1539,7 @@ export function TradingPage() {
                 <table className="w-full text-xs">
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
-                      <th className="text-left py-1 w-8">순위</th>
+                      <th className="text-left py-1 w-11">순위</th>
                       <th className="text-left py-1">종목명</th>
                       <th className="text-right py-1">현재가</th>
                       <th className="text-right py-1">등락률</th>
@@ -1493,7 +1559,14 @@ export function TradingPage() {
                           key={stock.id}
                           className="border-b border-[#2b2f36]"
                         >
-                          <td className="py-1.5">{i + 1}</td>
+                          <td className="py-1.5">
+                            <div className="flex items-center gap-1">
+                              <span>{i + 1}</span>
+                              <RankBadge
+                                change={stockRankChanges.get(stock.id)}
+                              />
+                            </div>
+                          </td>
                           <td className="py-1.5">{stock.name}</td>
                           <td className="text-right py-1.5">
                             {Number(stock.price).toLocaleString("ko-KR")}
@@ -1505,7 +1578,10 @@ export function TradingPage() {
                         </tr>
                       );
                     })}
-                    {stocks.length === 0 && (
+                    {stocksLoading && stocks.length === 0 && (
+                      <TableSkeleton columns={4} rows={5} />
+                    )}
+                    {!stocksLoading && stocks.length === 0 && (
                       <tr>
                         <td
                           colSpan={4}
@@ -1522,7 +1598,7 @@ export function TradingPage() {
               {marketTab === "랭킹" && (
                 <table className="w-full table-fixed text-xs">
                   <colgroup>
-                    <col className="w-9" />
+                    <col className="w-11" />
                     <col />
                     <col className="w-[42%]" />
                   </colgroup>
@@ -1536,7 +1612,14 @@ export function TradingPage() {
                   <tbody className="text-white">
                     {rankings?.map((item) => (
                       <tr key={item.rank} className="border-b border-[#2b2f36]">
-                        <td className="py-1.5 tabular-nums">{item.rank}</td>
+                        <td className="py-1.5 tabular-nums">
+                          <div className="flex items-center gap-1">
+                            <span>{item.rank}</span>
+                            <RankBadge
+                              change={rankingRankChanges.get(item.username)}
+                            />
+                          </div>
+                        </td>
                         {/* 아이디가 길면 잘리지만, 드래그해서 가로로 밀면 끝까지 볼 수 있다 */}
                         <td className="py-1.5 pr-2">
                           <div
