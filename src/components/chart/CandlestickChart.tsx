@@ -540,14 +540,17 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         );
       }
       if (opts.ma) {
-        const maHtml = MA_CONFIGS.map((ma, i) => {
+        const maSpans = MA_CONFIGS.map((ma, i) => {
           const v = param.seriesData.get(maSeries[i]) as { value: number } | undefined;
           return v
             ? `<span style="color:${ma.color}">MA${ma.period} ${Math.round(v.value).toLocaleString()}</span>`
             : "";
-        }).join("");
-        if (maHtml) {
-          items.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${maHtml}</div>`);
+        }).filter(Boolean);
+        // 세로 배치일 땐 다른 항목들처럼 MA값도 하나씩 각자 줄을 차지하게 한다
+        if (layout === "vertical") {
+          items.push(...maSpans);
+        } else if (maSpans.length > 0) {
+          items.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${maSpans.join("")}</div>`);
         }
       }
 
