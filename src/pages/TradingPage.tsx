@@ -306,6 +306,8 @@ export function TradingPage() {
       return showToast("정정 가격을 입력해주세요.", "error");
     if (parseInt(amendPrice) === Math.trunc(Number(selectedOrder.price)))
       return showToast("기존 주문과 다른 가격으로 정정해주세요.", "error");
+    if (amendInsufficientBalance)
+      return showToast("주문 가능 금액이 부족합니다.", "error");
     setAmendLoading(true);
     try {
       const response = await apiClient.put(`/orders/${selectedOrder.id}`, {
@@ -346,6 +348,22 @@ export function TradingPage() {
       setCancelLoading(false);
     }
   };
+
+  // 매수 정정은 미체결 잔량에 새 가격을 곱한 만큼 잔고가 필요하다.
+  // (가격을 내리면 추가로 필요한 금액이 없으므로 0으로 취급)
+  const amendRemainingQty = selectedOrder
+    ? BigInt(selectedOrder.quantity) - BigInt(selectedOrder.filledQuantity)
+    : 0n;
+  const amendPriceDiff = selectedOrder
+    ? BigInt(parseInt(amendPrice) || 0) -
+      BigInt(Math.trunc(Number(selectedOrder.price)))
+    : 0n;
+  const amendExtraCost =
+    selectedOrder?.tradingType === "BUY" && amendPriceDiff > 0n
+      ? amendPriceDiff * amendRemainingQty
+      : 0n;
+  const amendInsufficientBalance =
+    amendExtraCost > BigInt(accountData?.account?.availableBalance ?? "0");
 
   const selectOrder = (order: OrderItem) => {
     setSelectedOrder(order);
@@ -1040,6 +1058,12 @@ export function TradingPage() {
                           onStep={stepPrice}
                           hint={`호가 단위 ${getTickSize(parseInt(amendPrice) || 0).toLocaleString("ko-KR")}원`}
                         />
+                        {amendInsufficientBalance && (
+                          <p className="mt-1.5 text-[11px] text-[#f6465d]">
+                            주문 가능 금액이 부족합니다. (추가로 필요한 금액{" "}
+                            {amendExtraCost.toLocaleString("ko-KR")}원)
+                          </p>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -1124,6 +1148,7 @@ export function TradingPage() {
                   onClick={handleAmend}
                   disabled={
                     amendLoading ||
+                    amendInsufficientBalance ||
                     parseInt(amendPrice) ===
                       Math.trunc(Number(selectedOrder.price))
                   }
