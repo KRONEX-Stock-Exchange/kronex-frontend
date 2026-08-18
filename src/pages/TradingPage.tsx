@@ -16,9 +16,62 @@ interface StockItem {
   changeRate: number;
 }
 
+interface RankingItem {
+  rank: number;
+  username: string;
+  totalAssets: string;
+}
+
+const RANKING_TOP_N = 10;
+
+// 송금 API가 아직 없어서 지금은 항상 빈 배열이지만, 연동되면 그대로 채워 쓸 수 있게 미리 형태만 잡아둔다
+interface TransferHistoryItem {
+  id: string;
+  toAccountNumber: number;
+  amount: string;
+  createdAt: string;
+}
+
 const fmtWon = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const fmtTime = (value?: string) =>
   value ? new Date(value).toLocaleTimeString("ko-KR") : "-";
+
+// 큰 금액을 조/억/만 단위로 줄여 쓴다. (예: 123456789 → "1억 2,345만원")
+const WON_UNITS = [
+  { size: 1000000000000n, label: "조" },
+  { size: 100000000n, label: "억" },
+  { size: 10000n, label: "만" },
+];
+
+// 서버가 BigInt를 문자열로 주므로 정수부만 사용한다
+const toWonInt = (value: string | number) => String(value).split(".")[0];
+
+const fmtCompactWon = (value: string) => {
+  let amount: bigint;
+  try {
+    amount = BigInt(value);
+  } catch {
+    return "-";
+  }
+  const negative = amount < 0n;
+  if (negative) amount = -amount;
+
+  const unitIndex = WON_UNITS.findIndex((u) => amount >= u.size);
+  if (unitIndex === -1)
+    return `${negative ? "-" : ""}${amount.toLocaleString("ko-KR")}원`;
+
+  // 최상위 단위와 그 바로 아래 단위까지만 남겨서 한눈에 읽히게 한다
+  const unit = WON_UNITS[unitIndex];
+  const head = amount / unit.size;
+  const sub = WON_UNITS[unitIndex + 1];
+  const subValue = sub ? (amount % unit.size) / sub.size : 0n;
+
+  const text =
+    subValue > 0n
+      ? `${head.toLocaleString("ko-KR")}${unit.label} ${subValue.toLocaleString("ko-KR")}${sub!.label}`
+      : `${head.toLocaleString("ko-KR")}${unit.label}`;
+  return `${negative ? "-" : ""}${text}원`;
+};
 
 const PERCENT_SNAP_POINTS = [0, 25, 50, 75, 100];
 const PERCENT_SNAP_THRESHOLD = 4;
@@ -30,6 +83,8 @@ const sliderThumbLeft = (pct: number) =>
 
 type OrderTypeTab = "매수" | "매도" | "정정" | "취소";
 type AccountTab = "계좌" | "체결" | "미체결" | "송금";
+type MarketTab = "실시간 등락률" | "랭킹";
+type AmountMode = "원본" | "간략";
 
 // 계좌 요약에서 현금 항목과 평가 항목을 구분하는 세로 구분자
 function GroupDivider() {
@@ -210,6 +265,17 @@ export function TradingPage() {
   const [amendLoading, setAmendLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
 
+  const [transferTarget, setTransferTarget] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferLoading, setTransferLoading] = useState(false);
+  // TODO: 송금 내역 API가 생기면 계좌 전환 시 조회해서 채운다
+  const [transferHistory] = useState<TransferHistoryItem[]>([]);
+
+  const [marketTab, setMarketTab] = useState<MarketTab>("실시간 등락률");
+  const [amountMode, setAmountMode] = useState<AmountMode>("원본");
+  const [rankings, setRankings] = useState<RankingItem[] | null>(null);
+  const [rankingLoading, setRankingLoading] = useState(false);
+
   // 계좌 패널 스크롤이 바닥에 가까워지면 현재 탭(체결/미체결)의 다음 페이지를 불러옴
   const handleAccountPanelScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -232,6 +298,33 @@ export function TradingPage() {
     setPrice(String(Math.trunc(Number(livePrice))));
   }
 
+  // 퍼센트 슬라이더 값에 따른 주문 수량 계산 (슬라이더 조작 시, 종목 전환 시 공용으로 쓴다)
+  const computeQuantityForPercent = (pct: number) => {
+    const orderPrice =
+      priceType === "지정가"
+        ? parseInt(price)
+        : parseFloat(data?.stockInfo?.upperLimit ?? "0");
+    if (orderType === "매수") {
+      const availableBalance = accountData?.account?.availableBalance ?? "0";
+      if (orderPrice <= 0) return null;
+      return String(
+        (BigInt(availableBalance) * BigInt(pct)) / 100n / BigInt(orderPrice),
+      );
+    }
+    const holding = accountData?.holdings?.find((s) => s.stock.id === stockId);
+    const canSell = parseInt(holding?.availableQuantity ?? "0");
+    return String(Math.floor((canSell * pct) / 100));
+  };
+
+  // 종목이 바뀌면(가격 초기화가 끝난 뒤) 퍼센트바로 잡아둔 수량도 새 종목 기준으로 다시 계산한다.
+  // (퍼센트를 아직 안 건드렸으면 0%라 재계산할 의미가 없으므로 건너뛴다)
+  useEffect(() => {
+    if (orderPercent <= 0) return;
+    const qty = computeQuantityForPercent(orderPercent);
+    if (qty !== null) setQuantity(qty);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pricedStockId]);
+
   useEffect(() => {
     const fetchStocks = async () => {
       const response = await apiClient.get<StockItem[]>("/stocks");
@@ -244,6 +337,35 @@ export function TradingPage() {
     const interval = setInterval(fetchStocks, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // 랭킹은 탭이 열려 있을 때만 주기적으로 갱신한다
+  useEffect(() => {
+    if (marketTab !== "랭킹") return;
+
+    let canceled = false;
+    const fetchRankings = async () => {
+      try {
+        const response = await apiClient.get<{ rankings: RankingItem[] }>(
+          `/rankings/assets?page=1&size=${RANKING_TOP_N}`,
+        );
+        if (canceled) return;
+        setRankings(
+          response.success && response.data ? response.data.rankings : [],
+        );
+      } catch {
+        if (canceled) return;
+        setRankings([]);
+      }
+      setRankingLoading(false);
+    };
+    setRankingLoading(true);
+    fetchRankings();
+    const interval = setInterval(fetchRankings, 30000);
+    return () => {
+      canceled = true;
+      clearInterval(interval);
+    };
+  }, [marketTab]);
 
   const clearToastTimers = () => {
     toastTimers.current.forEach(clearTimeout);
@@ -348,6 +470,43 @@ export function TradingPage() {
       setCancelLoading(false);
     }
   };
+
+  const handleTransfer = async () => {
+    const amount = parseInt(transferAmount);
+    if (!transferTarget.trim())
+      return showToast("받는 계좌번호를 입력해주세요.", "error");
+    if (!amount || amount < 1)
+      return showToast("송금 금액을 입력해주세요.", "error");
+    if (transferTarget.trim() === String(selectedAccount?.accountNumber ?? ""))
+      return showToast("보내는 계좌와 받는 계좌가 같습니다.", "error");
+    if (BigInt(amount) > BigInt(accountData?.account?.availableBalance ?? "0"))
+      return showToast("주문 가능 금액이 부족합니다.", "error");
+    setTransferLoading(true);
+    try {
+      const response = await apiClient.post("/accounts/transfer", {
+        fromAccountNumber: selectedAccount?.accountNumber,
+        toAccountNumber: Number(transferTarget),
+        amount,
+      });
+      if (response.success) {
+        showToast("송금이 완료되었습니다.", "success");
+        setTransferTarget("");
+        setTransferAmount("");
+      } else {
+        showToast(getErrorMsg(response.error, "송금에 실패했습니다."), "error");
+      }
+    } catch {
+      showToast("서버 연결에 실패했습니다.", "error");
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
+  const transferAmountInt = parseInt(transferAmount) || 0;
+  const transferInsufficientBalance =
+    transferAmountInt > 0 &&
+    BigInt(transferAmountInt) >
+      BigInt(accountData?.account?.availableBalance ?? "0");
 
   // 매수 정정은 미체결 잔량에 새 가격을 곱한 만큼 잔고가 필요하다.
   // (가격을 내리면 추가로 필요한 금액이 없으므로 0으로 취급)
@@ -497,7 +656,9 @@ export function TradingPage() {
                             }`}
                           >
                             {holdingsSummary.totalProfit > 0 ? "+" : ""}
-                            {holdingsSummary.totalProfit.toLocaleString("ko-KR")}{" "}
+                            {holdingsSummary.totalProfit.toLocaleString(
+                              "ko-KR",
+                            )}{" "}
                             KRW
                           </span>
                         </div>
@@ -720,7 +881,9 @@ export function TradingPage() {
                           </td>
                         </tr>
                       )}
-                    {loadingMoreFilled && <TableSkeleton columns={9} rows={3} />}
+                    {loadingMoreFilled && (
+                      <TableSkeleton columns={9} rows={3} />
+                    )}
                   </tbody>
                 </table>
               )}
@@ -772,7 +935,9 @@ export function TradingPage() {
                             {Number(order.quantity).toLocaleString("ko-KR")}
                           </td>
                           <td className="text-right py-2">
-                            {Number(order.filledQuantity).toLocaleString("ko-KR")}
+                            {Number(order.filledQuantity).toLocaleString(
+                              "ko-KR",
+                            )}
                           </td>
                           <td className="text-right py-2">
                             {order.orderType === "MARKET"
@@ -805,8 +970,130 @@ export function TradingPage() {
               )}
 
               {accountTab === "송금" && (
-                <div className="w-full py-12 text-center text-zinc-500 text-sm">
-                  아직 지원하지 않는 기능입니다
+                <div className="flex flex-row gap-8 items-start">
+                  <div className="flex-4 min-w-0 flex flex-col gap-4">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-zinc-500">
+                        보내는 계좌
+                      </label>
+                      <select
+                        value={selectedAccount?.id ?? ""}
+                        onChange={(e) => {
+                          const account = accounts.find(
+                            (a) => a.id === Number(e.target.value),
+                          );
+                          if (account) setSelectedAccount(account);
+                        }}
+                        className="w-full bg-[#1f232b] text-white text-sm px-3 py-2.5 rounded-lg outline-none appearance-none text-left"
+                      >
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.accountNumber}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-zinc-500">
+                        받는 계좌번호
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={transferTarget}
+                        onChange={(e) =>
+                          setTransferTarget(e.target.value.replace(/\D/g, ""))
+                        }
+                        placeholder="계좌번호를 입력하세요"
+                        className="w-full bg-[#1f232b] text-white placeholder-zinc-600 text-sm px-3 py-2.5 rounded-lg outline-none text-left"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-baseline justify-between">
+                        <label className="text-xs text-zinc-500">
+                          송금 금액
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTransferAmount(
+                              accountData?.account?.availableBalance ?? "0",
+                            )
+                          }
+                          className="text-[10px] text-[#F59E0B] hover:underline"
+                        >
+                          전액
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={transferAmount}
+                        onChange={(e) =>
+                          setTransferAmount(e.target.value.replace(/\D/g, ""))
+                        }
+                        className="w-full bg-[#1f232b] text-white placeholder-zinc-600 text-sm px-3 py-2.5 rounded-lg outline-none tabular-nums text-left"
+                      />
+                      <span className="text-[10px] text-zinc-600">
+                        주문가능금액{" "}
+                        {fmtWon(accountData?.account?.availableBalance ?? "0")}{" "}
+                        KRW
+                      </span>
+                      {transferInsufficientBalance && (
+                        <p className="text-[11px] text-[#f6465d]">
+                          주문 가능 금액이 부족합니다.
+                        </p>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={handleTransfer}
+                      disabled={
+                        transferLoading ||
+                        !transferTarget ||
+                        transferAmountInt < 1 ||
+                        transferInsufficientBalance
+                      }
+                      className="py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#F59E0B] text-gray-900 shrink-0"
+                    >
+                      {transferLoading ? "처리중..." : "송금"}
+                    </button>
+                  </div>
+
+                  <div className="flex-6 min-w-0 flex flex-col gap-1.5">
+                    <span className="text-xs text-zinc-500">
+                      최근 송금 내역
+                    </span>
+                    <div className="rounded-lg border border-[#2b2f36] divide-y divide-[#2b2f36]">
+                      {transferHistory.length === 0 ? (
+                        <p className="py-10 text-center text-xs text-zinc-500">
+                          송금 내역이 없습니다
+                        </p>
+                      ) : (
+                        transferHistory.map((t) => (
+                          <div
+                            key={t.id}
+                            className="flex items-center justify-between px-3 py-2.5 text-xs"
+                          >
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-white">
+                                {t.toAccountNumber}
+                              </span>
+                              <span className="text-zinc-500">
+                                {fmtTime(t.createdAt)}
+                              </span>
+                            </div>
+                            <span className="text-white tabular-nums">
+                              {fmtWon(t.amount)} KRW
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -932,34 +1219,8 @@ export function TradingPage() {
                                   Math.abs(raw - p) <= PERCENT_SNAP_THRESHOLD,
                               ) ?? raw;
                             setOrderPercent(pct);
-                            const orderPrice =
-                              priceType === "지정가"
-                                ? parseInt(price)
-                                : parseFloat(
-                                    data?.stockInfo?.upperLimit ?? "0",
-                                  );
-                            if (orderType === "매수") {
-                              const availableBalance =
-                                accountData?.account?.availableBalance ?? "0";
-                              if (orderPrice > 0)
-                                setQuantity(
-                                  String(
-                                    (BigInt(availableBalance) * BigInt(pct)) /
-                                      100n /
-                                      BigInt(orderPrice),
-                                  ),
-                                );
-                            } else {
-                              const holding = accountData?.holdings?.find(
-                                (s) => s.stock.id === stockId,
-                              );
-                              const canSell = parseInt(
-                                holding?.availableQuantity ?? "0",
-                              );
-                              setQuantity(
-                                String(Math.floor((canSell * pct) / 100)),
-                              );
-                            }
+                            const qty = computeQuantityForPercent(pct);
+                            if (qty !== null) setQuantity(qty);
                           }}
                           style={{
                             background: `linear-gradient(to right, ${orderType === "매수" ? "#f6465d" : "#2563eb"} ${sliderThumbLeft(orderPercent)}, #2b2f36 ${sliderThumbLeft(orderPercent)})`,
@@ -1170,52 +1431,144 @@ export function TradingPage() {
           </div>
 
           <div className="flex-42 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
-            <div className="text-sm text-zinc-400 mb-3">실시간 등락률</div>
+            <div className="flex items-center gap-3 mb-3 shrink-0">
+              <button
+                onClick={() => setMarketTab("실시간 등락률")}
+                className={`text-sm ${marketTab === "실시간 등락률" ? "text-white" : "text-zinc-400"}`}
+              >
+                실시간 등락률
+              </button>
+              <div className="w-px h-3 bg-[#2b2f36]" />
+              <button
+                onClick={() => setMarketTab("랭킹")}
+                className={`flex items-center gap-1 text-sm ${marketTab === "랭킹" ? "text-white" : "text-zinc-400"}`}
+              >
+                랭킹
+                <span className="px-1 py-0.5 rounded text-[9px] font-semibold leading-none bg-[#2b2f36] text-zinc-400">
+                  TOP 10
+                </span>
+              </button>
+              {/* 금액 표기 방식은 큰 숫자가 나오는 랭킹 탭에서만 고른다 */}
+              <div
+                className={`ml-auto flex items-center gap-1 shrink-0 ${marketTab === "랭킹" ? "" : "invisible"}`}
+              >
+                {(["원본", "간략"] as AmountMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setAmountMode(mode)}
+                    title={
+                      mode === "원본"
+                        ? "숫자를 원래 자릿수 그대로 표시"
+                        : "만/억/조 단위로 줄여서 표시"
+                    }
+                    className={`px-2 py-0.5 rounded text-[10px] ${amountMode === mode ? "bg-[#1f232b] text-white font-semibold" : "text-zinc-500 hover:text-zinc-300"}`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex-1 overflow-auto scrollbar-thin">
-              <table className="w-full text-xs">
-                <thead className="text-zinc-500 border-b border-[#2b2f36]">
-                  <tr>
-                    <th className="text-left py-1 w-8">순위</th>
-                    <th className="text-left py-1">종목명</th>
-                    <th className="text-right py-1">현재가</th>
-                    <th className="text-right py-1">등락률</th>
-                  </tr>
-                </thead>
-                <tbody className="text-white">
-                  {stocks.map((stock, i) => {
-                    const per = stock.changeRate;
-                    const color =
-                      per > 0
-                        ? "text-[#f6465d]"
-                        : per < 0
-                          ? "text-[#2563eb]"
-                          : "text-white";
-                    return (
-                      <tr key={stock.id} className="border-b border-[#2b2f36]">
-                        <td className="py-1.5">{i + 1}</td>
-                        <td className="py-1.5">{stock.name}</td>
-                        <td className="text-right py-1.5">
-                          {Number(stock.price).toLocaleString("ko-KR")}
-                        </td>
-                        <td className={`text-right py-1.5 ${color}`}>
-                          {per > 0 ? "+" : ""}
-                          {per.toFixed(2)}%
+              {marketTab === "실시간 등락률" && (
+                <table className="w-full text-xs">
+                  <thead className="text-zinc-500 border-b border-[#2b2f36]">
+                    <tr>
+                      <th className="text-left py-1 w-8">순위</th>
+                      <th className="text-left py-1">종목명</th>
+                      <th className="text-right py-1">현재가</th>
+                      <th className="text-right py-1">등락률</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-white">
+                    {stocks.map((stock, i) => {
+                      const per = stock.changeRate;
+                      const color =
+                        per > 0
+                          ? "text-[#f6465d]"
+                          : per < 0
+                            ? "text-[#2563eb]"
+                            : "text-white";
+                      return (
+                        <tr
+                          key={stock.id}
+                          className="border-b border-[#2b2f36]"
+                        >
+                          <td className="py-1.5">{i + 1}</td>
+                          <td className="py-1.5">{stock.name}</td>
+                          <td className="text-right py-1.5">
+                            {Number(stock.price).toLocaleString("ko-KR")}
+                          </td>
+                          <td className={`text-right py-1.5 ${color}`}>
+                            {per > 0 ? "+" : ""}
+                            {per.toFixed(2)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {stocks.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="pt-12 pb-4 text-center text-zinc-500"
+                        >
+                          종목 데이터 없음
                         </td>
                       </tr>
-                    );
-                  })}
-                  {stocks.length === 0 && (
+                    )}
+                  </tbody>
+                </table>
+              )}
+
+              {marketTab === "랭킹" && (
+                <table className="w-full table-fixed text-xs">
+                  <colgroup>
+                    <col className="w-9" />
+                    <col />
+                    <col className="w-[42%]" />
+                  </colgroup>
+                  <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
-                      <td
-                        colSpan={4}
-                        className="pt-12 pb-4 text-center text-zinc-500"
-                      >
-                        종목 데이터 없음
-                      </td>
+                      <th className="text-left py-1">순위</th>
+                      <th className="text-left py-1">아이디</th>
+                      <th className="text-right py-1">평가자산</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="text-white">
+                    {rankings?.map((item) => (
+                      <tr key={item.rank} className="border-b border-[#2b2f36]">
+                        <td className="py-1.5 tabular-nums">{item.rank}</td>
+                        {/* 아이디가 길면 잘리지만, 드래그해서 가로로 밀면 끝까지 볼 수 있다 */}
+                        <td className="py-1.5 pr-2">
+                          <div
+                            title={item.username}
+                            className="overflow-x-auto whitespace-nowrap cursor-text"
+                          >
+                            {item.username}
+                          </div>
+                        </td>
+                        <td className="text-right py-1.5 tabular-nums">
+                          {amountMode === "원본"
+                            ? `${fmtWon(toWonInt(item.totalAssets))}원`
+                            : fmtCompactWon(toWonInt(item.totalAssets))}
+                        </td>
+                      </tr>
+                    ))}
+                    {rankingLoading && !rankings && (
+                      <TableSkeleton columns={3} rows={5} />
+                    )}
+                    {!rankingLoading && rankings?.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="pt-12 pb-4 text-center text-zinc-500"
+                        >
+                          랭킹 데이터 없음
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
