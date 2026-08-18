@@ -189,12 +189,18 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
 
     // 기본 라벨과 동일하게 "화면에 보이는 마지막 캔들"을 기준으로 한다.
     // (과거로 스크롤하면 그 시점의 캔들 정보가 떠야 하므로 배열의 최신 캔들이 아니다)
+    // range.to를 직접 floor하면 봉 경계의 소수점 오차로 옆 봉을 가리킬 수 있어
+    // 라이브러리가 제공하는 barsInLogicalRange로 실제 마지막 가시 봉의 시각을 구한다.
     const sorted = sortedRef.current;
     const range = chart.timeScale().getVisibleLogicalRange();
-    const lastVisibleIdx = range
-      ? Math.min(sorted.length - 1, Math.floor(range.to))
-      : sorted.length - 1;
-    const last = lastVisibleIdx >= 0 ? sorted[lastVisibleIdx] : undefined;
+    let last: ParsedCandle | undefined;
+    if (!range) {
+      last = sorted[sorted.length - 1];
+    } else {
+      const barsInfo = series.barsInLogicalRange(range);
+      const toKey = barsInfo?.to !== undefined ? paramTimeToKey(barsInfo.to) : undefined;
+      last = toKey !== undefined ? sorted.find((c) => String(c.chartTime) === toKey) : undefined;
+    }
     if (!last) {
       badge.style.display = "none";
       return;
@@ -246,9 +252,14 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       return;
     }
 
-    const from = Math.max(0, Math.ceil(range.from));
-    const to = Math.min(sorted.length - 1, Math.floor(range.to));
-    if (from > to) {
+    // 여기도 range.from/to를 직접 ceil/floor하면 봉 경계에서 옆 봉이 섞여 들어갈 수 있어
+    // badge와 동일하게 barsInLogicalRange가 알려주는 실제 첫/마지막 가시 봉의 시각으로 인덱스를 찾는다.
+    const barsInfo = series.barsInLogicalRange(range);
+    const fromKey = barsInfo?.from !== undefined ? paramTimeToKey(barsInfo.from) : undefined;
+    const toKey = barsInfo?.to !== undefined ? paramTimeToKey(barsInfo.to) : undefined;
+    const from = fromKey !== undefined ? sorted.findIndex((c) => String(c.chartTime) === fromKey) : -1;
+    const to = toKey !== undefined ? sorted.findIndex((c) => String(c.chartTime) === toKey) : -1;
+    if (from < 0 || to < 0 || from > to) {
       highEl.style.display = "none";
       lowEl.style.display = "none";
       return;

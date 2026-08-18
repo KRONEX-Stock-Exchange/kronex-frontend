@@ -1,6 +1,10 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { apiClient } from "../services/api/client";
+import { AuthShell } from "../components/auth/AuthShell";
+import { AuthField } from "../components/auth/AuthField";
+import { AuthAlert } from "../components/auth/AuthAlert";
+import { AuthSubmitButton } from "../components/auth/AuthSubmitButton";
 
 interface SignupForm {
   username: string;
@@ -8,19 +12,48 @@ interface SignupForm {
   password: string;
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 8;
+
 export function RegisterPage() {
   const navigate = useNavigate();
-  const [form, setForm] = useState<SignupForm>({ username: "", email: "", password: "" });
+  const [form, setForm] = useState<SignupForm>({
+    username: "",
+    email: "",
+    password: "",
+  });
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+    if (error) setError("");
   };
+
+  // 제출 전에도 바로 알 수 있도록 입력 즉시 검사한다 (입력 중인 칸은 아직 지적하지 않음)
+  const emailError =
+    form.email && !EMAIL_REGEX.test(form.email)
+      ? "올바른 이메일 형식이 아닙니다."
+      : "";
+  const passwordError =
+    form.password && form.password.length < MIN_PASSWORD_LENGTH
+      ? `비밀번호는 ${MIN_PASSWORD_LENGTH}자 이상이어야 합니다.`
+      : "";
+  const confirmError =
+    confirmPassword && confirmPassword !== form.password
+      ? "비밀번호가 일치하지 않습니다."
+      : "";
+
+  const canSubmit =
+    !!form.username &&
+    !!form.email &&
+    !!form.password &&
+    !!confirmPassword &&
+    !emailError &&
+    !passwordError &&
+    !confirmError;
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -31,8 +64,7 @@ export function RegisterPage() {
       return;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(form.email)) {
+    if (!EMAIL_REGEX.test(form.email)) {
       setError("올바른 이메일 형식을 입력해주세요.");
       return;
     }
@@ -46,12 +78,16 @@ export function RegisterPage() {
       });
 
       if (response.success) {
-        sessionStorage.setItem("authMessage", "회원가입이 완료되었습니다. 로그인해주세요.");
+        sessionStorage.setItem(
+          "authMessage",
+          "회원가입이 완료되었습니다. 로그인해주세요.",
+        );
         navigate("/login");
       } else {
         const errorMsg =
           typeof response.error === "object" && response.error !== null
-            ? (response.error as { message?: string }).message || "회원가입에 실패했습니다."
+            ? (response.error as { message?: string }).message ||
+              "회원가입에 실패했습니다."
             : response.error || "회원가입에 실패했습니다.";
         setError(errorMsg);
       }
@@ -62,122 +98,81 @@ export function RegisterPage() {
     }
   };
 
-  const EyeIcon = ({ visible }: { visible: boolean }) =>
-    visible ? (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
-        <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
-        <line x1="1" y1="1" x2="23" y2="23" />
-      </svg>
-    ) : (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-        <circle cx="12" cy="12" r="3" />
-      </svg>
-    );
-
-  const fields = [
-    { name: "username", label: "아이디", type: "text", placeholder: "아이디를 입력하세요", autoComplete: "username" },
-    { name: "email", label: "이메일", type: "email", placeholder: "이메일을 입력하세요", autoComplete: "email" },
-  ] as const;
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#14161b] px-4">
-      <div className="w-full max-w-100">
-        {/* 로고 */}
-        <div className="mb-10 text-center">
-          <p className="text-3xl tracking-tight mb-4 font-['Archivo_Black']"><span className="text-[#F59E0B]">K</span><span className="text-white">RONEX</span></p>
-          <h1 className="text-2xl font-bold text-white">처음 오셨군요!</h1>
-          <p className="text-zinc-400 text-sm mt-1">계정을 만들고 거래를 시작하세요</p>
-        </div>
-
-        {/* 폼 카드 */}
-        <div className="bg-[#181a20] rounded-xl p-6 border border-[#2b2f36]">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {fields.map((field) => (
-              <div key={field.name} className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-zinc-400">{field.label}</label>
-                <input
-                  type={field.type}
-                  name={field.name}
-                  value={form[field.name]}
-                  onChange={handleChange}
-                  placeholder={field.placeholder}
-                  autoComplete={field.autoComplete}
-                  required
-                  className="w-full bg-[#1f232b] text-white placeholder-zinc-500 px-4 py-3.5 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B] transition-colors text-sm"
-                />
-              </div>
-            ))}
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-zinc-400">비밀번호</label>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  name="password"
-                  value={form.password}
-                  onChange={handleChange}
-                  placeholder="비밀번호를 입력하세요"
-                  autoComplete="new-password"
-                  required
-                  className="w-full bg-[#1f232b] text-white placeholder-zinc-500 px-4 py-3.5 pr-11 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B] transition-colors text-sm"
-                />
-                <button type="button" onClick={() => setShowPassword((v) => !v)} tabIndex={-1}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors">
-                  <EyeIcon visible={showPassword} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-zinc-400">비밀번호 확인</label>
-              <div className="relative">
-                <input
-                  type={showConfirm ? "text" : "password"}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="비밀번호를 다시 입력하세요"
-                  autoComplete="new-password"
-                  required
-                  className="w-full bg-[#1f232b] text-white placeholder-zinc-500 px-4 py-3.5 pr-11 rounded-lg border border-[#3b3f46] outline-none focus:border-[#F59E0B] transition-colors text-sm"
-                />
-                <button type="button" onClick={() => setShowConfirm((v) => !v)} tabIndex={-1}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors">
-                  <EyeIcon visible={showConfirm} />
-                </button>
-              </div>
-            </div>
-
-            {error && (
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-[#d03b3b]/10 border border-[#d03b3b]/30">
-                <span className="text-[#e2685f] text-sm">⚠</span>
-                <p className="text-[#e2685f] text-xs">{error}</p>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3.5 bg-[#D97706] hover:bg-[#B45309] active:bg-[#92400E] text-white font-bold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed mt-1 text-sm"
-            >
-              {loading ? "처리 중..." : "회원가입"}
-            </button>
-          </form>
-        </div>
-
-        {/* 로그인 링크 */}
-        <p className="text-center text-sm text-zinc-400 mt-6">
+    <AuthShell
+      title="처음 오셨군요!"
+      subtitle="계정을 만들고 거래를 시작하세요"
+      footer={
+        <>
           이미 계정이 있으신가요?{" "}
-          <button
-            type="button"
-            onClick={() => navigate("/login")}
-            className="text-[#F59E0B] font-semibold hover:underline"
+          <Link
+            to="/login"
+            className="font-semibold text-[#F59E0B] hover:underline"
           >
             로그인
-          </button>
-        </p>
-      </div>
-    </div>
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+        <AuthField
+          label="아이디"
+          name="username"
+          value={form.username}
+          onChange={handleChange}
+          placeholder="아이디를 입력하세요"
+          autoComplete="username"
+          autoFocus
+          required
+        />
+
+        <AuthField
+          label="이메일"
+          name="email"
+          type="email"
+          value={form.email}
+          onChange={handleChange}
+          placeholder="이메일을 입력하세요"
+          autoComplete="email"
+          required
+          error={emailError}
+        />
+
+        <AuthField
+          label="비밀번호"
+          name="password"
+          type="password"
+          value={form.password}
+          onChange={handleChange}
+          placeholder="비밀번호를 입력하세요"
+          autoComplete="new-password"
+          required
+          error={passwordError}
+          hint={`${MIN_PASSWORD_LENGTH}자 이상 입력해주세요.`}
+        />
+
+        <AuthField
+          label="비밀번호 확인"
+          name="confirmPassword"
+          type="password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          placeholder="비밀번호를 다시 입력하세요"
+          autoComplete="new-password"
+          required
+          error={confirmError}
+        />
+
+        {error && <AuthAlert type="error" message={error} />}
+
+        <AuthSubmitButton
+          loading={loading}
+          loadingLabel="처리 중..."
+          disabled={!canSubmit}
+        >
+          회원가입
+        </AuthSubmitButton>
+      </form>
+    </AuthShell>
   );
 }
