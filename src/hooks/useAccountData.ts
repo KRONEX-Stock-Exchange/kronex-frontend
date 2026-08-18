@@ -46,6 +46,59 @@ export interface OrderData {
   openOrders: OrderItem[];
 }
 
+interface OrdersPageResponse {
+  orders: OrderItem[];
+  nextCursor: string | null;
+}
+
+// cursor: undefined = 아직 페이지 조회를 시도 안 함 (커서를 마지막 항목에서 유도해야 함)
+//         string    = 다음 페이지 조회에 쓸 커서
+//         null      = 더 이상 데이터 없음
+type PageCursor = string | null | undefined;
+
+// 미체결 인덱스는 score == order.id라 커서를 바로 id로 씀
+function lastOpenCursor(orders?: OrderItem[]): string | undefined {
+  return orders?.[orders.length - 1]?.id;
+}
+
+// 체결 인덱스는 score == fullyFilledAt(epoch ms), 없으면 id 폴백 (백엔드 filledOrderScore와 동일 로직)
+function lastFilledCursor(orders?: OrderItem[]): string | undefined {
+  const last = orders?.[orders.length - 1];
+  if (!last) return undefined;
+  return last.fullyFilledAt
+    ? String(new Date(last.fullyFilledAt).getTime())
+    : last.id;
+}
+
+// 이미 있는 항목이면 그 자리에서 갱신(정렬 위치 유지), 없으면 맨 앞에 추가(새 항목이라 항상 최신)
+function upsertOrder(list: OrderItem[], order: OrderItem): OrderItem[] {
+  const exists = list.some((o) => o.id === order.id);
+  if (exists) return list.map((o) => (o.id === order.id ? order : o));
+  return [order, ...list];
+}
+
+// orderUpdated(delta) 이벤트 반영: 페이지 밖에 있던 항목이라도 status만 보고 정확히 어느 탭에 있어야 하는지 판단
+function applyOrderDelta(prev: OrderData | null, updates: OrderItem[]): OrderData {
+  let openOrders = prev?.openOrders ?? [];
+  let filledOrders = prev?.filledOrders ?? [];
+
+  for (const order of updates) {
+    if (order.status === "OPEN") {
+      openOrders = upsertOrder(openOrders, order);
+      filledOrders = filledOrders.filter((o) => o.id !== order.id);
+    } else if (order.status === "FILLED") {
+      openOrders = openOrders.filter((o) => o.id !== order.id);
+      filledOrders = upsertOrder(filledOrders, order);
+    } else {
+      // CANCELED / REPLACED / REJECTED / COMPLETED / RECEIVED → 양쪽 탭에서 제거
+      openOrders = openOrders.filter((o) => o.id !== order.id);
+      filledOrders = filledOrders.filter((o) => o.id !== order.id);
+    }
+  }
+
+  return { openOrders, filledOrders };
+}
+
 export interface AccountInfo {
   id: number;
   accountNumber?: number;
@@ -65,11 +118,86 @@ export function useAccountData(accountId: number | null) {
   const socketRef = useRef<Socket | null>(null);
   const priceSockets = useRef<Map<number, Socket>>(new Map());
 
+  const [openCursor, setOpenCursor] = useState<PageCursor>(undefined);
+  const [filledCursor, setFilledCursor] = useState<PageCursor>(undefined);
+  const [loadingMoreOpen, setLoadingMoreOpen] = useState(false);
+  const [loadingMoreFilled, setLoadingMoreFilled] = useState(false);
+
+  // 소켓 이벤트 핸들러(마운트 시 한 번 등록)에서 최신 상태를 읽기 위한 ref
+  const openCursorRef = useRef(openCursor);
+  openCursorRef.current = openCursor;
+  const filledCursorRef = useRef(filledCursor);
+  filledCursorRef.current = filledCursor;
+  const orderDataRef = useRef(orderData);
+  orderDataRef.current = orderData;
+  const loadingMoreOpenRef = useRef(false);
+  const loadingMoreFilledRef = useRef(false);
+
+  // 미체결 주문 다음 페이지 조회 (무한 스크롤)
+  const loadMoreOpenOrders = () => {
+    const sock = socketRef.current;
+    if (!accountId || !sock) return;
+    if (openCursorRef.current === null) return; // 더 이상 없음
+    if (loadingMoreOpenRef.current) return;
+
+    const cursor = openCursorRef.current ?? lastOpenCursor(orderDataRef.current?.openOrders);
+    if (cursor == null) return; // 목록이 비어있어 페이징할 기준이 없음
+
+    loadingMoreOpenRef.current = true;
+    setLoadingMoreOpen(true);
+
+    sock.emit(
+      "getOpenOrders",
+      { accountId, cursor },
+      (res: OrdersPageResponse) => {
+        setOrderData((prev) => ({
+          filledOrders: prev?.filledOrders ?? [],
+          openOrders: [...(prev?.openOrders ?? []), ...res.orders],
+        }));
+        setOpenCursor(res.nextCursor);
+        loadingMoreOpenRef.current = false;
+        setLoadingMoreOpen(false);
+      },
+    );
+  };
+
+  // 체결 주문 다음 페이지 조회 (무한 스크롤)
+  const loadMoreFilledOrders = () => {
+    const sock = socketRef.current;
+    if (!accountId || !sock) return;
+    if (filledCursorRef.current === null) return;
+    if (loadingMoreFilledRef.current) return;
+
+    const cursor =
+      filledCursorRef.current ?? lastFilledCursor(orderDataRef.current?.filledOrders);
+    if (cursor == null) return;
+
+    loadingMoreFilledRef.current = true;
+    setLoadingMoreFilled(true);
+
+    sock.emit(
+      "getFilledOrders",
+      { accountId, cursor },
+      (res: OrdersPageResponse) => {
+        setOrderData((prev) => ({
+          openOrders: prev?.openOrders ?? [],
+          filledOrders: [...(prev?.filledOrders ?? []), ...res.orders],
+        }));
+        setFilledCursor(res.nextCursor);
+        loadingMoreFilledRef.current = false;
+        setLoadingMoreFilled(false);
+      },
+    );
+  };
+
   // 메인 소켓: 계좌 구독
   useEffect(() => {
     if (!accountId) return;
 
     setData(null); // 계좌 변경 시 이전 데이터 초기화 → price socket effect 재실행 트리거
+    setOrderData(null);
+    setOpenCursor(undefined);
+    setFilledCursor(undefined);
 
     let active = true;
 
@@ -134,18 +262,18 @@ export function useAccountData(accountId: number | null) {
         },
       );
 
-      newSocket.on("openOrdersUpdated", (data: OrderItem[]) => {
-        setOrderData((prev) => ({
-          filledOrders: prev?.filledOrders ?? [],
-          openOrders: data,
-        }));
+      // 계좌 입장 시 1회성 초기 페이지 (이후 갱신은 orderUpdated로 옴)
+      newSocket.on("openOrdersInit", (data: OrderItem[]) => {
+        setOrderData((prev) => ({ filledOrders: prev?.filledOrders ?? [], openOrders: data }));
       });
 
-      newSocket.on("filledOrdersUpdated", (data: OrderItem[]) => {
-        setOrderData((prev) => ({
-          filledOrders: data,
-          openOrders: prev?.openOrders ?? [],
-        }));
+      newSocket.on("filledOrdersInit", (data: OrderItem[]) => {
+        setOrderData((prev) => ({ openOrders: prev?.openOrders ?? [], filledOrders: data }));
+      });
+
+      // 실시간 delta: 바뀐 주문만 옴. status 보고 어느 탭에 반영할지 판단 (스크롤로 불러온 뒷페이지 항목도 정확히 처리됨)
+      newSocket.on("orderUpdated", (updates: OrderItem[]) => {
+        setOrderData((prev) => applyOrderDelta(prev, updates));
       });
 
       newSocket.on("errorCustom", async ({ message }: { message: string }) => {
@@ -257,5 +385,15 @@ export function useAccountData(accountId: number | null) {
     };
   }, []);
 
-  return { data, orderData, socket };
+  return {
+    data,
+    orderData,
+    socket,
+    loadMoreOpenOrders,
+    loadMoreFilledOrders,
+    loadingMoreOpen,
+    loadingMoreFilled,
+    hasMoreOpenOrders: openCursor !== null,
+    hasMoreFilledOrders: filledCursor !== null,
+  };
 }

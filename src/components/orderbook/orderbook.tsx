@@ -11,6 +11,7 @@ const MAX_TICKS = 10; // 호가창 최대 행 수
 
 interface OrderBookProps {
   data: OrderbookData;
+  loading?: boolean;
 }
 
 // 체결 현황 컴포넌트
@@ -109,7 +110,7 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
   );
 }
 
-export function OrderBook({ data }: OrderBookProps) {
+export function OrderBook({ data, loading }: OrderBookProps) {
   const prevSellRef = useRef<OrderbookItem[]>([]);
   const prevBuyRef = useRef<OrderbookItem[]>([]);
   const [sellDiffs, setSellDiffs] = useState<Map<string, number>>(new Map());
@@ -249,6 +250,13 @@ export function OrderBook({ data }: OrderBookProps) {
 
   return (
     <div className="h-full bg-[#181a20] rounded-xl overflow-hidden relative">
+      {/* 종목 전환 시 이 패널 안에서만 보이는 로딩 오버레이 */}
+      <div
+        className={`absolute inset-0 z-30 flex items-center justify-center bg-[#0e0f13]/80 transition-opacity duration-300 ease-out ${loading ? "opacity-100" : "pointer-events-none opacity-0"}`}
+      >
+        <div className="h-8 w-8 rounded-full border-4 border-[#2b2f36] border-t-[#F59E0B] animate-spin" />
+      </div>
+
       {/* 주식 정보 패널 (매도 영역 오른쪽) */}
       <div className="absolute right-0 top-0 w-[38%] h-[48%]">
         <StockInfoPanel stockInfo={data?.stockInfo || null} />

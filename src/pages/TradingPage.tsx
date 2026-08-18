@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { Toast, type ToastData } from "../components/common/Toast";
 import { OrderBook } from "../components/orderbook/orderbook";
 import { StockHeader } from "../components/stock/StockHeader";
 import { CandlestickChart } from "../components/chart/CandlestickChart";
@@ -122,9 +123,14 @@ export function TradingPage() {
   const [stockId, setStockId] = useState<number | null>(null);
   const { data, loading: orderbookLoading } = useOrderbook(stockId);
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
-  const { data: accountData, orderData } = useAccountData(
-    selectedAccount?.id ?? null,
-  );
+  const {
+    data: accountData,
+    orderData,
+    loadMoreOpenOrders,
+    loadMoreFilledOrders,
+    loadingMoreOpen,
+    loadingMoreFilled,
+  } = useAccountData(selectedAccount?.id ?? null);
 
   const [accountTab, setAccountTab] = useState<AccountTab>("계좌");
   const [orderType, setOrderType] = useState<OrderTypeTab>("매수");
@@ -135,15 +141,24 @@ export function TradingPage() {
   const [orderLoading, setOrderLoading] = useState(false);
   const [stocks, setStocks] = useState<StockItem[]>([]);
 
-  const [toast, setToast] = useState<{
-    message: string;
-    type: "success" | "error";
-  } | null>(null);
+  const [toast, setToast] = useState<ToastData | null>(null);
+  const [toastLeaving, setToastLeaving] = useState(false);
+  const toastTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
   const [amendPrice, setAmendPrice] = useState("");
   const [amendLoading, setAmendLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
+
+  // 계좌 패널 스크롤이 바닥에 가까워지면 현재 탭(체결/미체결)의 다음 페이지를 불러옴
+  const handleAccountPanelScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (!nearBottom) return;
+
+    if (accountTab === "체결") loadMoreFilledOrders();
+    else if (accountTab === "미체결") loadMoreOpenOrders();
+  };
 
   // 종목이 바뀌면 주문가격을 그 종목의 현재가로 1회 초기화한다.
   // (렌더 중 상태 조정 패턴 — 이후 사용자가 입력한 값은 덮어쓰지 않는다)
@@ -170,10 +185,26 @@ export function TradingPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const showToast = (message: string, type: "success" | "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+  const clearToastTimers = () => {
+    toastTimers.current.forEach(clearTimeout);
+    toastTimers.current = [];
   };
+
+  const hideToast = () => {
+    clearToastTimers();
+    setToastLeaving(true);
+    // 사라지는 애니메이션(300ms)이 끝난 뒤 언마운트
+    toastTimers.current.push(setTimeout(() => setToast(null), 300));
+  };
+
+  const showToast = (message: string, type: "success" | "error") => {
+    clearToastTimers();
+    setToastLeaving(false);
+    setToast({ id: Date.now(), message, type });
+    toastTimers.current.push(setTimeout(hideToast, 3000));
+  };
+
+  useEffect(() => clearToastTimers, []);
 
   const getErrorMsg = (error: unknown, fallback: string) =>
     typeof error === "object" && error !== null
@@ -213,6 +244,8 @@ export function TradingPage() {
   const handleAmend = async () => {
     if (!selectedOrder || !amendPrice || parseInt(amendPrice) < 1)
       return showToast("정정 가격을 입력해주세요.", "error");
+    if (parseInt(amendPrice) === Math.trunc(Number(selectedOrder.price)))
+      return showToast("기존 주문과 다른 가격으로 정정해주세요.", "error");
     setAmendLoading(true);
     try {
       const response = await apiClient.put(`/orders/${selectedOrder.id}`, {
@@ -265,7 +298,7 @@ export function TradingPage() {
   };
 
   return (
-    <div className="relative flex flex-col h-full w-full">
+    <div className="flex flex-col h-full w-full">
       {/* 종목 선택 바는 거래 화면 전체 폭을 사용한다. */}
       <div className="shrink-0 px-5 pt-2.5">
         <StockHeader
@@ -275,13 +308,6 @@ export function TradingPage() {
           onSelectStock={setStockId}
           contentWidthTarget={chartPanel}
         />
-      </div>
-
-      {/* 페이지 전체(상단 바 포함)를 덮는 로딩 오버레이. 퍼센트 슬라이더(z-20)보다 위에 있어야 뚫려 보이지 않는다. */}
-      <div
-        className={`absolute inset-0 z-40 flex items-center justify-center bg-[#0e0f13]/80 transition-opacity duration-300 ease-out ${orderbookLoading ? "opacity-100" : "pointer-events-none opacity-0"}`}
-      >
-        <div className="h-10 w-10 rounded-full border-4 border-[#2b2f36] border-t-[#F59E0B] animate-spin" />
       </div>
 
       <div className="flex flex-1 min-h-0 gap-2.5 px-5 pt-2.5 pb-2.5">
@@ -308,7 +334,10 @@ export function TradingPage() {
               )}
             </div>
 
-            <div className="flex-1 min-h-0 overflow-auto scrollbar-thin">
+            <div
+              className="flex-1 min-h-0 overflow-auto scrollbar-thin"
+              onScroll={handleAccountPanelScroll}
+            >
               {accountTab === "계좌" && (
                 <>
                   <div className="mb-3 flex items-center gap-6 pb-2.5">
@@ -524,6 +553,16 @@ export function TradingPage() {
                         </td>
                       </tr>
                     )}
+                    {loadingMoreFilled && (
+                      <tr>
+                        <td
+                          colSpan={9}
+                          className="py-3 text-center text-[11px] text-zinc-500"
+                        >
+                          불러오는 중...
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               )}
@@ -598,6 +637,16 @@ export function TradingPage() {
                         </td>
                       </tr>
                     )}
+                    {loadingMoreOpen && (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className="py-3 text-center text-[11px] text-zinc-500"
+                        >
+                          불러오는 중...
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               )}
@@ -613,7 +662,7 @@ export function TradingPage() {
 
         {/* 중: 호가창 (기존 렌더 폭 유지) */}
         <div className="w-[calc(30%-16px)] shrink-0">
-          <OrderBook data={data} />
+          <OrderBook data={data} loading={orderbookLoading} />
         </div>
 
         {/* 우: 주문 + 등락률 */}
@@ -938,7 +987,11 @@ export function TradingPage() {
               {orderType === "정정" && selectedOrder && (
                 <button
                   onClick={handleAmend}
-                  disabled={amendLoading}
+                  disabled={
+                    amendLoading ||
+                    parseInt(amendPrice) ===
+                      Math.trunc(Number(selectedOrder.price))
+                  }
                   className="mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#F59E0B] text-gray-900 shrink-0"
                 >
                   {amendLoading ? "처리중..." : "정정 확인"}
@@ -1009,11 +1062,7 @@ export function TradingPage() {
       </div>
 
       {toast && (
-        <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium shadow-lg z-50 ${toast.type === "success" ? "bg-[#0ecb81] text-black" : "bg-[#f6465d] text-white"}`}
-        >
-          {toast.message}
-        </div>
+        <Toast toast={toast} leaving={toastLeaving} onClose={hideToast} />
       )}
     </div>
   );

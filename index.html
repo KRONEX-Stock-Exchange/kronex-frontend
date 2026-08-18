@@ -2,6 +2,32 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Vite 프로덕션 빌드는 module script/css link를 head 맨 위가 아니라
+      // 임의 위치에 주입하므로, 그것들이 로드되기 전에 에러 리스너부터
+      // 등록해야 한다 — 그래야 배포 직후 남은 옛 index.html이 이미 사라진
+      // 해시 파일명을 참조해 로드에 실패했을 때(빈 화면 원인) 놓치지 않고
+      // 세션당 한 번 자동으로 새로고침해서 최신 index.html을 다시 받아온다.
+      (function () {
+        window.addEventListener(
+          "error",
+          function (e) {
+            var target = e.target;
+            if (!target || !target.tagName) return;
+            var url = target.src || target.href || "";
+            if (
+              (target.tagName === "SCRIPT" || target.tagName === "LINK") &&
+              url.indexOf("/assets/") !== -1 &&
+              !sessionStorage.getItem("kronex_stale_asset_reload")
+            ) {
+              sessionStorage.setItem("kronex_stale_asset_reload", "1");
+              window.location.reload();
+            }
+          },
+          true,
+        );
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=6" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kronex</title>

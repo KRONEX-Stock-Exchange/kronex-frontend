@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { Header } from "./Header";
 import { AccountProvider } from "../../contexts/AccountContext";
+import { UpdateAvailableBanner } from "../common/UpdateAvailableBanner";
 
 export function Layout() {
   return (
@@ -11,6 +12,7 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+      <UpdateAvailableBanner />
     </AccountProvider>
   );
 }

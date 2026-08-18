@@ -6,6 +6,7 @@ import {
   HistogramSeries,
   LineSeries,
   CrosshairMode,
+  TickMarkType,
 } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, LogicalRange } from "lightweight-charts";
 import { io, Socket } from "socket.io-client";
@@ -30,6 +31,24 @@ const MA_CONFIGS = [
   { period: 60, color: "#199e70" },
   { period: 120, color: "#d95926" },
 ] as const;
+
+interface LegendOptions {
+  ma: boolean;
+  high: boolean;
+  low: boolean;
+  open: boolean;
+  close: boolean;
+  volume: boolean;
+}
+
+const LEGEND_TOGGLES: { key: keyof LegendOptions; label: string }[] = [
+  { key: "ma", label: "이동평균선 정보" },
+  { key: "high", label: "고가" },
+  { key: "low", label: "저가" },
+  { key: "open", label: "시가" },
+  { key: "close", label: "종가" },
+  { key: "volume", label: "거래량" },
+];
 
 interface CandleItem {
   candleTime: string;
@@ -58,6 +77,12 @@ interface ParsedCandle {
 
 const KST_OFFSET = 9 * 3600;
 
+// 차트 폰트 크기 (createChart의 layout.fontSize)
+const AXIS_FONT_SIZE = 11;
+
+// 최고/최저 마커 화살표 끝과 봉 사이 여백(px)
+const MARKER_GAP = 5;
+
 function toChartTime(candleTime: string, type: ChartType): string | number {
   const d = new Date(candleTime);
   if (type === "1d") {
@@ -66,6 +91,16 @@ function toChartTime(candleTime: string, type: ChartType): string | number {
   }
   // raw UTC timestamp — KST 변환은 tickMarkFormatter/timeFormatter에서 처리
   return Math.floor(d.getTime() / 1000);
+}
+
+// 최고/최저 마커 라벨에 쓰는 짧은 날짜 표기 (MM/DD)
+function fmtMarkerDate(chartTime: string | number): string {
+  if (typeof chartTime === "string") {
+    const [, m, d] = chartTime.split("-");
+    return m && d ? `${m}/${d}` : chartTime;
+  }
+  const d = new Date((chartTime + KST_OFFSET) * 1000);
+  return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
 function parseCandle(item: CandleItem, type: ChartType): ParsedCandle {
@@ -113,31 +148,265 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
   const sortedRef = useRef<ParsedCandle[]>([]); // 시간순 정렬 배열 (시리즈 업데이트용)
   const nextCursorRef = useRef<string | null>(null); // 다음(과거) 페이지 커서, 없으면 null
   const loadingMoreRef = useRef(false); // 과거 데이터 중복 요청 방지
+  const stickToLiveRef = useRef(true); // 최신 봉이 보이는 상태인지 (과거 스크롤 중엔 false)
   const socketRef = useRef<Socket | null>(null);
+  const highMarkerRef = useRef<HTMLDivElement>(null);
+  const highMarkerLabelRef = useRef<HTMLSpanElement>(null);
+  const highArrowRef = useRef<SVGSVGElement>(null);
+  const lowMarkerRef = useRef<HTMLDivElement>(null);
+  const lowMarkerLabelRef = useRef<HTMLSpanElement>(null);
+  const lowArrowRef = useRef<SVGSVGElement>(null);
+  const lastPriceMarkerRef = useRef<HTMLDivElement>(null);
+  const lastPriceValueRef = useRef<HTMLSpanElement>(null);
+  const lastPricePctRef = useRef<HTMLSpanElement>(null);
   const [chartType, setChartType] = useState<ChartType>("1d");
+  const [showMinMax, setShowMinMax] = useState(true);
+  const showMinMaxRef = useRef(showMinMax);
+  const [legendOptions, setLegendOptions] = useState<LegendOptions>({
+    ma: true,
+    high: true,
+    low: true,
+    open: true,
+    close: true,
+    volume: true,
+  });
+  const legendOptionsRef = useRef(legendOptions);
+  const [legendLayout, setLegendLayout] = useState<"horizontal" | "vertical">("vertical");
+  const legendLayoutRef = useRef(legendLayout);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+  // 현재가 라벨 — 가격과 등락률을 한 네모 안에 두 줄로 그린다.
+  // 기본 라벨과 똑같이 가격축 영역의 왼쪽 가장자리에서 시작해 가격 좌표를 세로 중심으로 놓으므로
+  // 기본 라벨이 있던 자리에 그대로 붙어 같이 움직인다.
+  const updateLastPriceBadge = () => {
+    const series = candleSeriesRef.current;
+    const chart = chartRef.current;
+    const container = containerRef.current;
+    const badge = lastPriceMarkerRef.current;
+    if (!series || !chart || !container || !badge) return;
+
+    // 기본 라벨과 동일하게 "화면에 보이는 마지막 캔들"을 기준으로 한다.
+    // (과거로 스크롤하면 그 시점의 캔들 정보가 떠야 하므로 배열의 최신 캔들이 아니다)
+    const sorted = sortedRef.current;
+    const range = chart.timeScale().getVisibleLogicalRange();
+    const lastVisibleIdx = range
+      ? Math.min(sorted.length - 1, Math.floor(range.to))
+      : sorted.length - 1;
+    const last = lastVisibleIdx >= 0 ? sorted[lastVisibleIdx] : undefined;
+    if (!last) {
+      badge.style.display = "none";
+      return;
+    }
+
+    const y = series.priceToCoordinate(last.close);
+    if (y === null) {
+      badge.style.display = "none";
+      return;
+    }
+
+    // 캔들 색과 같은 기준(종가 vs 시가)으로 색을 정해야 봉 색과 라벨 색이 어긋나지 않는다
+    const isUp = last.close >= last.open;
+    const pct = last.open > 0 ? ((last.close - last.open) / last.open) * 100 : 0;
+
+    badge.style.display = "flex";
+    badge.style.left = `${container.clientWidth - chart.priceScale("right").width()}px`;
+    badge.style.top = `${y}px`;
+    badge.style.backgroundColor = isUp ? "#f6465d" : "#2563eb";
+    if (lastPriceValueRef.current) {
+      lastPriceValueRef.current.textContent = Math.round(last.close).toLocaleString("ko-KR");
+    }
+    if (lastPricePctRef.current) {
+      lastPricePctRef.current.textContent = `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+    }
+  };
+
+  // 화면에 보이는 구간의 최고/최저 캔들 위치에 작은 화살표 라벨을 띄운다
+  const updateMinMaxLines = () => {
+    updateLastPriceBadge();
+
+    const series = candleSeriesRef.current;
+    const chart = chartRef.current;
+    const highEl = highMarkerRef.current;
+    const lowEl = lowMarkerRef.current;
+    if (!series || !chart || !highEl || !lowEl) return;
+
+    if (!showMinMaxRef.current) {
+      highEl.style.display = "none";
+      lowEl.style.display = "none";
+      return;
+    }
+
+    const sorted = sortedRef.current;
+    const range = chart.timeScale().getVisibleLogicalRange();
+    if (!range || sorted.length === 0) {
+      highEl.style.display = "none";
+      lowEl.style.display = "none";
+      return;
+    }
+
+    const from = Math.max(0, Math.ceil(range.from));
+    const to = Math.min(sorted.length - 1, Math.floor(range.to));
+    if (from > to) {
+      highEl.style.display = "none";
+      lowEl.style.display = "none";
+      return;
+    }
+
+    let highCandle = sorted[from];
+    let lowCandle = sorted[from];
+    for (let i = from + 1; i <= to; i++) {
+      if (sorted[i].high > highCandle.high) highCandle = sorted[i];
+      if (sorted[i].low < lowCandle.low) lowCandle = sorted[i];
+    }
+
+    const lastClose = sorted[sorted.length - 1].close;
+    const fmtPct = (v: number) => {
+      if (lastClose <= 0) return "";
+      const p = ((v - lastClose) / lastClose) * 100;
+      return ` (${p >= 0 ? "+" : ""}${p.toFixed(2)}%)`;
+    };
+
+    // 캔들이 화면 가장자리에 있으면 라벨이 밖으로 잘리므로, 공간이 없는 쪽이면 반대편으로 뒤집는다.
+    // (DOM 순서는 [라벨, 화살표] 고정. row-reverse로 좌우를 바꾸고 화살표는 scaleX로 뒤집는다)
+    const plotLeft = 0;
+    const plotRight = (containerRef.current?.clientWidth ?? 0) - chart.priceScale("right").width();
+
+    const placeMarker = (
+      el: HTMLDivElement,
+      labelEl: HTMLSpanElement | null,
+      arrowEl: SVGSVGElement | null,
+      x: number,
+      y: number,
+      text: string,
+      preferLeft: boolean,
+    ) => {
+      el.style.display = "flex";
+      if (labelEl) labelEl.textContent = text;
+
+      const w = el.offsetWidth + MARKER_GAP;
+      // 선호하는 쪽에 공간이 없고 반대쪽에는 있으면 뒤집는다
+      let onLeft = preferLeft;
+      if (preferLeft && x - w < plotLeft && x + w <= plotRight) onLeft = false;
+      else if (!preferLeft && x + w > plotRight && x - w >= plotLeft) onLeft = true;
+
+      el.style.flexDirection = onLeft ? "row" : "row-reverse";
+      el.style.transform = onLeft ? "translate(-100%, -50%)" : "translate(0, -50%)";
+      if (arrowEl) arrowEl.style.transform = onLeft ? "" : "scaleX(-1)";
+      // 화살표 끝이 봉에 딱 닿지 않도록 살짝 띄운다
+      el.style.left = `${onLeft ? x - MARKER_GAP : x + MARKER_GAP}px`;
+      el.style.top = `${y}px`;
+    };
+
+    const highX = chart.timeScale().timeToCoordinate(highCandle.chartTime as never);
+    const highY = series.priceToCoordinate(highCandle.high);
+    if (highX === null || highY === null) {
+      highEl.style.display = "none";
+    } else {
+      placeMarker(
+        highEl,
+        highMarkerLabelRef.current,
+        highArrowRef.current,
+        highX,
+        highY,
+        `최고 ${Math.round(highCandle.high).toLocaleString("ko-KR")}${fmtPct(highCandle.high)} (${fmtMarkerDate(highCandle.chartTime)})`,
+        true,
+      );
+    }
+
+    const lowX = chart.timeScale().timeToCoordinate(lowCandle.chartTime as never);
+    const lowY = series.priceToCoordinate(lowCandle.low);
+    if (lowX === null || lowY === null) {
+      lowEl.style.display = "none";
+    } else {
+      placeMarker(
+        lowEl,
+        lowMarkerLabelRef.current,
+        lowArrowRef.current,
+        lowX,
+        lowY,
+        `최저 ${Math.round(lowCandle.low).toLocaleString("ko-KR")}${fmtPct(lowCandle.low)} (${fmtMarkerDate(lowCandle.chartTime)})`,
+        false,
+      );
+    }
+  };
+
+  useEffect(() => {
+    showMinMaxRef.current = showMinMax;
+    updateMinMaxLines();
+  }, [showMinMax]);
+
+  useEffect(() => {
+    legendOptionsRef.current = legendOptions;
+  }, [legendOptions]);
+
+  useEffect(() => {
+    legendLayoutRef.current = legendLayout;
+  }, [legendLayout]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [settingsOpen]);
 
   // 차트 초기화 (마운트 1회)
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
 
-    const fmtKst = (time: unknown) => {
+    const fmtDatePart = (time: unknown) => {
       if (typeof time === "object" && time !== null) {
         const { year, month, day } = time as { year: number; month: number; day: number };
         return `${year}.${String(month).padStart(2, "0")}.${String(day).padStart(2, "0")}`;
       }
+      // 일봉은 "yyyy-mm-dd" 형식의 BusinessDay 문자열로 넘어올 수 있다
+      if (typeof time === "string") {
+        const [y, m, d] = time.split("-");
+        if (y && m && d) return `${y}.${m}.${d}`;
+      }
       if (typeof time === "number") {
         const d = new Date((time + KST_OFFSET) * 1000);
-        return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+        return `${d.getUTCFullYear()}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.${String(d.getUTCDate()).padStart(2, "0")}`;
       }
-      return String(time);
+      return "";
+    };
+
+    const fmtTimePart = (time: unknown) => {
+      if (typeof time !== "number") return "";
+      const d = new Date((time + KST_OFFSET) * 1000);
+      return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+    };
+
+    // 크로스헤어에 뜨는 시각 — 몇 시인지뿐 아니라 며칠인지도 함께 보여준다
+    // (object/string 형태의 BusinessDay는 일봉이라 시각 없이 날짜만 표시)
+    const fmtKst = (time: unknown) => {
+      if (typeof time !== "number") return fmtDatePart(time);
+      return `${fmtDatePart(time)} ${fmtTimePart(time)}`;
+    };
+
+    // 시간축 눈금 — 평소엔 시각만, 날짜가 바뀌는 눈금에서만 날짜를 보여줘 눈금이 빽빽해지지 않게 한다
+    const fmtTickMark = (time: unknown, tickMarkType: TickMarkType) => {
+      if (typeof time !== "number") return fmtDatePart(time);
+      if (
+        tickMarkType === TickMarkType.Time ||
+        tickMarkType === TickMarkType.TimeWithSeconds
+      ) {
+        return fmtTimePart(time);
+      }
+      return fmtDatePart(time);
     };
 
     const chart = createChart(container, {
       layout: {
         background: { type: ColorType.Solid, color: "#181a20" },
         textColor: "#848e9c",
-        fontSize: 11,
+        fontSize: AXIS_FONT_SIZE,
       },
       grid: {
         vertLines: { color: "#2b2f36" },
@@ -156,7 +425,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         borderColor: "#2b2f36",
         timeVisible: false,
         secondsVisible: false,
-        tickMarkFormatter: fmtKst,
+        tickMarkFormatter: fmtTickMark,
       },
       rightPriceScale: { borderColor: "#2b2f36" },
       handleScale: {
@@ -180,6 +449,8 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         formatter: (price: number) => price < 0 ? "" : price.toLocaleString("ko-KR"),
         minMove: 1,
       },
+      // 가격+등락률을 한 네모로 직접 그리므로 기본 라벨은 끈다 (updateLastPriceBadge 참고)
+      lastValueVisible: false,
     });
     // right 스케일: 하단 30% 비워서 volume 영역 확보
     candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: 0.30 } });
@@ -229,35 +500,66 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       const fmtPct = (p: number) => `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
       const col = (p: number) => (p >= 0 ? "#f6465d" : "#2563eb");
 
-      const maHtml = MA_CONFIGS.map((ma, i) => {
-        const v = param.seriesData.get(maSeries[i]) as { value: number } | undefined;
-        return v
-          ? `<span style="color:${ma.color};margin-left:8px">MA${ma.period} ${Math.round(v.value).toLocaleString()}</span>`
-          : "";
-      }).join("");
+      const opts = legendOptionsRef.current;
+      const layout = legendLayoutRef.current;
 
-      const cell = (label: string, v: number, first = false) => {
+      // 항목(시/고/저/종/거래량/MA) 하나를 나타내는 html 조각. 항목 간 간격은
+      // 부모 컨테이너의 gap이 담당하므로 여기서는 margin을 쓰지 않는다.
+      const cell = (label: string, v: number) => {
         const p = pct(v); const c = col(p);
-        return `<span style="color:#848e9c${first ? "" : ";margin-left:8px"}">${label}</span>` +
-          `<span style="color:${c};margin-left:2px">${v.toLocaleString()}</span>` +
-          `<span style="color:${c};margin-left:2px;font-size:10px">(${fmtPct(p)})</span>`;
+        return `<div style="display:flex;align-items:center;gap:2px">` +
+          `<span style="color:#848e9c">${label}</span>` +
+          `<span style="color:${c}">${v.toLocaleString()}</span>` +
+          `<span style="color:${c};font-size:10px">(${fmtPct(p)})</span>` +
+          `</div>`;
       };
 
-      legend.style.display = "flex";
-      legend.innerHTML =
-        cell("시", ohlc.open, true) +
-        cell("고", ohlc.high) +
-        cell("저", ohlc.low) +
-        cell("종", ohlc.close) +
-        `<span style="color:#848e9c;margin-left:8px">거래량</span><span style="color:#aaa;margin-left:2px">${Math.round(vol).toLocaleString()}</span>` +
-        maHtml;
+      const items: string[] = [];
+      if (opts.open) items.push(cell("시", ohlc.open));
+      if (opts.high) items.push(cell("고", ohlc.high));
+      if (opts.low) items.push(cell("저", ohlc.low));
+      if (opts.close) items.push(cell("종", ohlc.close));
+      if (opts.volume) {
+        items.push(
+          `<div style="display:flex;align-items:center;gap:2px">` +
+            `<span style="color:#848e9c">거래량</span>` +
+            `<span style="color:#aaa">${Math.round(vol).toLocaleString()}</span>` +
+            `</div>`
+        );
+      }
+      if (opts.ma) {
+        const maHtml = MA_CONFIGS.map((ma, i) => {
+          const v = param.seriesData.get(maSeries[i]) as { value: number } | undefined;
+          return v
+            ? `<span style="color:${ma.color}">MA${ma.period} ${Math.round(v.value).toLocaleString()}</span>`
+            : "";
+        }).join("");
+        if (maHtml) {
+          items.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${maHtml}</div>`);
+        }
+      }
 
+      if (items.length === 0) { legend.style.display = "none"; return; }
+
+      legend.style.display = "flex";
+      legend.style.flexDirection = layout === "vertical" ? "column" : "row";
+      legend.style.alignItems = layout === "vertical" ? "flex-start" : "center";
+      legend.style.flexWrap = layout === "vertical" ? "nowrap" : "wrap";
+      legend.style.gap = layout === "vertical" ? "2px" : "8px";
+      legend.innerHTML = items.join("");
     });
 
     const handleResize = () => {
       chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
     };
     window.addEventListener("resize", handleResize);
+
+    // 가격축 드래그 리스케일, 자동 배율(autoScale) 애니메이션 등 위치가 바뀔 수 있는
+    // 모든 경우를 일일이 추적하는 대신 매 프레임 라벨 좌표를 다시 계산해 항상 따라오게 한다
+    let minMaxRafId = requestAnimationFrame(function tick() {
+      updateMinMaxLines();
+      minMaxRafId = requestAnimationFrame(tick);
+    });
 
     // 가격 축 줌인 차단: 자동 배율보다 범위가 줄어들면 auto-scale 복구
     let draggingPriceAxis = false;
@@ -285,6 +587,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     container.addEventListener("pointerup", onPointerUp);
 
     return () => {
+      cancelAnimationFrame(minMaxRafId);
       window.removeEventListener("resize", handleResize);
       container.removeEventListener("pointerdown", onPointerDown);
       container.removeEventListener("pointermove", onPointerMove);
@@ -311,6 +614,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     sortedRef.current = [];
     nextCursorRef.current = null;
     loadingMoreRef.current = false;
+    stickToLiveRef.current = true;
 
     // 전체 데이터를 정렬 후 모든 시리즈에 setData
     // scrollToLatest: 과거 데이터 추가 로드(무한 스크롤) 시에는 false로 호출해 스크롤 위치 유지
@@ -366,7 +670,8 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
 
       if (isNew) {
         // 새 봉: gap-fill과 충돌 가능성 있으므로 전체 재빌드
-        applyAllData();
+        // 과거 스크롤 중이면(stickToLiveRef=false) 최신으로 튕기지 않도록 스크롤 유지
+        applyAllData(stickToLiveRef.current);
         return;
       }
 
@@ -477,11 +782,14 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       }
     };
 
-    // 차트 왼쪽 끝에 근접하면(barsBefore < 10) 과거 데이터 추가 로드
+    // 차트 왼쪽 끝에 근접하면(barsBefore < 10) 과거 데이터 추가 로드,
+    // 오른쪽 끝(최신 봉)이 보이는지도 함께 추적해 실시간 업데이트가 스크롤을 되돌리지 않게 한다
     const handleVisibleRangeChange = (logicalRange: LogicalRange | null) => {
       if (!logicalRange) return;
       const barsInfo = candleSeries.barsInLogicalRange(logicalRange);
-      if (barsInfo !== null && barsInfo.barsBefore < 10) {
+      if (barsInfo === null) return;
+      stickToLiveRef.current = barsInfo.barsAfter <= 0;
+      if (barsInfo.barsBefore < 10) {
         loadMoreHistory();
       }
     };
@@ -545,15 +853,122 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
             </span>
           ))}
         </div>
+
+        <div ref={settingsRef} className="relative ml-auto">
+          <button
+            onClick={() => setSettingsOpen((v) => !v)}
+            aria-label="차트 설정"
+            className={`flex items-center justify-center w-6 h-6 rounded-md transition-colors ${
+              settingsOpen ? "bg-[#2b2f36] text-white" : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
+            </svg>
+          </button>
+
+          {settingsOpen && (
+            <div className="absolute top-full right-0 mt-1.5 w-44 bg-[#181a20] border border-[#2b2f36] rounded-lg shadow-2xl overflow-hidden z-50 p-2">
+              <label className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer">
+                고점/저점 표시
+                <input
+                  type="checkbox"
+                  checked={showMinMax}
+                  onChange={(e) => setShowMinMax(e.target.checked)}
+                  className="accent-[#F59E0B]"
+                />
+              </label>
+              <div className="my-1 border-t border-[#2b2f36]" />
+              <div className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300">
+                표시 방향
+                <div className="flex gap-0.5 bg-[#0d0e11] rounded-md p-0.5">
+                  <button
+                    onClick={() => setLegendLayout("horizontal")}
+                    className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                      legendLayout === "horizontal" ? "bg-[#2b2f36] text-white" : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    가로
+                  </button>
+                  <button
+                    onClick={() => setLegendLayout("vertical")}
+                    className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                      legendLayout === "vertical" ? "bg-[#2b2f36] text-white" : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    세로
+                  </button>
+                </div>
+              </div>
+              <div className="my-1 border-t border-[#2b2f36]" />
+              {LEGEND_TOGGLES.map(({ key, label }) => (
+                <label
+                  key={key}
+                  className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer"
+                >
+                  {label}
+                  <input
+                    type="checkbox"
+                    checked={legendOptions[key]}
+                    onChange={(e) =>
+                      setLegendOptions((prev) => ({ ...prev, [key]: e.target.checked }))
+                    }
+                    className="accent-[#F59E0B]"
+                  />
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       {/* 차트 영역 */}
       <div className="relative flex-1 min-h-0">
         {/* OHLCV + MA 범례 (크로스헤어 이동 시 표시) */}
         <div
           ref={legendRef}
-          className="absolute top-1 left-1 z-10 text-xs pointer-events-none items-center flex-wrap gap-0.5"
+          className="absolute top-1 left-1 z-10 text-xs pointer-events-none"
           style={{ display: "none" }}
         />
+        {/* 화면에 보이는 구간의 최고가 화살표 라벨 (기본: 캔들 왼쪽) */}
+        <div
+          ref={highMarkerRef}
+          className="absolute z-20 flex items-center gap-0.5 pointer-events-none"
+          style={{ display: "none", transform: "translate(-100%, -50%)" }}
+        >
+          <span
+            ref={highMarkerLabelRef}
+            className="whitespace-nowrap text-[9px] font-medium text-[#f6465d]"
+            style={{ textShadow: "0 0 4px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)" }}
+          />
+          <svg ref={highArrowRef} className="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="none">
+            <path d="M1 6H10.6M10.6 6L7.4 3.9M10.6 6L7.4 8.1" stroke="#f6465d" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        {/* 화면에 보이는 구간의 최저가 화살표 라벨 (기본: 캔들 오른쪽) */}
+        <div
+          ref={lowMarkerRef}
+          className="absolute z-20 flex items-center gap-0.5 pointer-events-none"
+          style={{ display: "none", flexDirection: "row-reverse", transform: "translate(0, -50%)" }}
+        >
+          <span
+            ref={lowMarkerLabelRef}
+            className="whitespace-nowrap text-[9px] font-medium text-[#2563eb]"
+            style={{ textShadow: "0 0 4px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)" }}
+          />
+          <svg ref={lowArrowRef} className="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="none" style={{ transform: "scaleX(-1)" }}>
+            <path d="M1 6H10.6M10.6 6L7.4 3.9M10.6 6L7.4 8.1" stroke="#2563eb" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        {/* 현재가 라벨 — 가격 + 등락률을 한 네모에 두 줄로 */}
+        <div
+          ref={lastPriceMarkerRef}
+          className="absolute z-20 flex flex-col items-center justify-center rounded-none px-1.5 py-0.5 pointer-events-none"
+          style={{ display: "none", transform: "translateY(-50%)" }}
+        >
+          <span ref={lastPriceValueRef} className="whitespace-nowrap text-[11px] font-bold leading-tight text-white" />
+          <span ref={lastPricePctRef} className="whitespace-nowrap text-[11px] font-bold leading-tight text-white" />
+        </div>
 <div ref={containerRef} className="w-full h-full" />
       </div>
     </div>
