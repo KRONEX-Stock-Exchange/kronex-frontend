@@ -160,6 +160,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
   const lastPriceValueRef = useRef<HTMLSpanElement>(null);
   const lastPricePctRef = useRef<HTMLSpanElement>(null);
   const [chartType, setChartType] = useState<ChartType>("1d");
+  const [chartLoading, setChartLoading] = useState(true);
   const [showMinMax, setShowMinMax] = useState(true);
   const showMinMaxRef = useRef(showMinMax);
   const [legendOptions, setLegendOptions] = useState<LegendOptions>({
@@ -605,6 +606,8 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     const maSeries = maSeriesRef.current;
     if (!candleSeries || !volumeSeries || maSeries.length === 0) return;
 
+    setChartLoading(true);
+
     // 분봉/시간봉은 시간 표시
     chartRef.current?.applyOptions({
       timeScale: { timeVisible: chartType !== "1d" },
@@ -705,6 +708,14 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     let active = true;
     let lastCandleTime = "";
 
+    // API 서버 과거 데이터와 realtime 서버의 현재 봉이 모두 도착해야 차트를 보여준다.
+    // (둘 중 하나라도 없으면 계속 로딩 — realtime 서버가 죽어 있으면 차트는 뜨지 않는다)
+    let apiReady = false;
+    let realtimeReady = false;
+    const revealIfReady = () => {
+      if (active && apiReady && realtimeReady) setChartLoading(false);
+    };
+
     const connectSocket = (token: string) => {
       const socket = io(`${REALTIME_URL}/stock`, {
         transports: ["websocket"],
@@ -727,10 +738,14 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
           candleMapRef.current.set(c.candleTime, parseCandle(c, chartType));
         }
         applyAllData();
+        realtimeReady = true;
+        revealIfReady();
       });
 
       // 3. 실시간 체결 업데이트
       socket.on("chartUpdated", (candle: CandleItem) => {
+        realtimeReady = true;
+        revealIfReady();
         updateLastCandle(candle);
       });
 
@@ -809,6 +824,8 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         nextCursorRef.current = res.data.nextCursor;
         applyAllData();
       }
+      apiReady = true;
+      revealIfReady();
 
       const token = tokenManager.getToken();
       if (token) connectSocket(token);
@@ -970,6 +987,13 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
           <span ref={lastPricePctRef} className="whitespace-nowrap text-[11px] font-bold leading-tight text-white" />
         </div>
 <div ref={containerRef} className="w-full h-full" />
+
+        {/* API 서버 + realtime 서버 데이터가 모두 도착할 때까지 덮어둔다 */}
+        {chartLoading && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#181a20]">
+            <div className="h-7 w-7 rounded-full border-2 border-[#2b2f36] border-t-[#F59E0B] animate-spin" />
+          </div>
+        )}
       </div>
     </div>
   );

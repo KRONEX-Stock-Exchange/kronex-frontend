@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import type { OrderbookData, OrderbookItem, MatchItem, StockInfo } from "../../hooks/useOrderbook";
-import { Tick, EmptyTick } from "./tick";
+import { Tick, EmptyTick, SkeletonTick } from "./tick";
 
 const toNum = (s: string | undefined | null) => {
   const n = parseFloat(s ?? "");
@@ -248,14 +248,39 @@ export function OrderBook({ data, loading }: OrderBookProps) {
   const emptySellCount = MAX_TICKS - sortedSellOrders.length;
   const emptyBuyCount = MAX_TICKS - sortedBuyOrders.length;
 
+  // 종목 전환 중에는 실제 호가창과 같은 규격의 스켈레톤을 보여준다
+  if (loading) {
+    return (
+      <div className="h-full bg-[#181a20] rounded-xl overflow-hidden">
+        <div className="h-[48%]">
+          {Array.from({ length: MAX_TICKS }).map((_, i) => (
+            <SkeletonTick key={`sk-sell-${i}`} type="sell" index={i} />
+          ))}
+        </div>
+        <div className="h-[48%]">
+          {Array.from({ length: MAX_TICKS }).map((_, i) => (
+            <SkeletonTick key={`sk-buy-${i}`} type="buy" index={i} />
+          ))}
+        </div>
+        <div className="h-[4%] flex items-center border-t border-[#2b2f36]">
+          <div className="w-[23%] flex justify-end pr-2">
+            <span className="h-3.5 w-10 animate-pulse rounded-sm bg-[#2b2f36]" />
+          </div>
+          <div className="w-[15%]" />
+          <div className="w-[24%] flex justify-center">
+            <span className="h-3.5 w-10 animate-pulse rounded-sm bg-[#2b2f36]" />
+          </div>
+          <div className="w-[15%]" />
+          <div className="w-[23%] flex justify-start pl-2">
+            <span className="h-3.5 w-10 animate-pulse rounded-sm bg-[#2b2f36]" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full bg-[#181a20] rounded-xl overflow-hidden relative">
-      {/* 종목 전환 시 이 패널 안에서만 보이는 로딩 오버레이 */}
-      <div
-        className={`absolute inset-0 z-30 flex items-center justify-center bg-[#0e0f13]/80 transition-opacity duration-300 ease-out ${loading ? "opacity-100" : "pointer-events-none opacity-0"}`}
-      >
-        <div className="h-8 w-8 rounded-full border-4 border-[#2b2f36] border-t-[#F59E0B] animate-spin" />
-      </div>
 
       {/* 주식 정보 패널 (매도 영역 오른쪽) */}
       <div className="absolute right-0 top-0 w-[38%] h-[48%]">

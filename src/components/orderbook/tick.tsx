@@ -127,6 +127,63 @@ export function Tick({
   );
 }
 
+// 로딩 틱 — EmptyTick과 같은 칸 규격을 그대로 쓰고 내용만 회색 막대로 대체
+function SkeletonBar({ w, delay }: { w: string; delay: number }) {
+  return (
+    <span
+      className="block h-3.5 animate-pulse rounded-sm bg-[#2b2f36]"
+      style={{ width: w, animationDelay: `${delay}ms` }}
+    />
+  );
+}
+
+export function SkeletonTick({
+  type,
+  index = 0,
+}: {
+  type: "sell" | "buy";
+  index?: number;
+}) {
+  const delay = (index % 5) * 100;
+  const qtyWidth = `${45 + ((index * 7) % 4) * 12}%`;
+
+  if (type === "sell") {
+    return (
+      <div className="w-full h-[10%]">
+        <div className="flex h-full">
+          <div className="w-[23%] h-full flex justify-end items-center px-2 bg-[#181a20]">
+            <SkeletonBar w={qtyWidth} delay={delay} />
+          </div>
+          <div className="w-[15%] h-full border-r flex justify-center items-center px-2 border-[rgb(43,47,54)] bg-[#1e2329]">
+            <SkeletonBar w="70%" delay={delay} />
+          </div>
+          <div className="w-[24%] h-full flex justify-center items-center px-3 bg-[#1e2329]">
+            <SkeletonBar w="75%" delay={delay} />
+          </div>
+          <div className="w-[38%] h-full bg-[#181a20]"></div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-[10%]">
+      <div className="flex h-full">
+        <div className="w-[38%] h-full bg-[#181a20]"></div>
+        <div className="w-[24%] h-full flex justify-center items-center px-3 bg-[#1e2329]">
+          <SkeletonBar w="75%" delay={delay} />
+        </div>
+        <div className="w-[15%] h-full border-l flex justify-center items-center px-2 border-[rgb(43,47,54)] bg-[#1e2329]">
+          <SkeletonBar w="70%" delay={delay} />
+        </div>
+        <div className="w-[23%] h-full flex justify-start items-center px-2 bg-[#181a20]">
+          <SkeletonBar w={qtyWidth} delay={delay} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 빈 틱 (데이터 없을 때)
 export function EmptyTick({ type }: { type: "sell" | "buy" }) {
   if (type === "sell") {

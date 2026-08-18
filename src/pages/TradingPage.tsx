@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { Toast, type ToastData } from "../components/common/Toast";
 import { OrderBook } from "../components/orderbook/orderbook";
 import { StockHeader } from "../components/stock/StockHeader";
@@ -30,6 +30,49 @@ const sliderThumbLeft = (pct: number) =>
 
 type OrderTypeTab = "매수" | "매도" | "정정" | "취소";
 type AccountTab = "계좌" | "체결" | "미체결" | "송금";
+
+// 계좌 요약에서 현금 항목과 평가 항목을 구분하는 세로 구분자
+function GroupDivider() {
+  return (
+    <span
+      aria-hidden
+      className="select-none self-center text-sm leading-none text-[#3b3f46]"
+    >
+      │
+    </span>
+  );
+}
+
+// 표 데이터를 기다리는 동안 실제 행과 같은 자리에 회색 막대를 깔아둔다
+function TableSkeleton({
+  columns,
+  rows = 6,
+}: {
+  columns: number;
+  rows?: number;
+}) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r} className="border-b border-[#2b2f36]">
+          {Array.from({ length: columns }).map((_, c) => (
+            <td key={c} className="py-2">
+              <span
+                className="block h-2.5 animate-pulse rounded bg-[#2b2f36]"
+                style={{
+                  // 컬럼마다 폭을 조금씩 다르게 해 실제 데이터처럼 보이게 한다
+                  width: `${55 + ((r + c * 3) % 4) * 10}%`,
+                  marginLeft: c === 0 ? 0 : "auto",
+                  animationDelay: `${r * 80}ms`,
+                }}
+              />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
 
 // 우측 위/아래 화살표로 증감하는 숫자 입력 (방향키도 동일하게 동작)
 function StepperInput({
@@ -126,11 +169,28 @@ export function TradingPage() {
   const {
     data: accountData,
     orderData,
+    loading: accountLoading,
     loadMoreOpenOrders,
     loadMoreFilledOrders,
     loadingMoreOpen,
     loadingMoreFilled,
   } = useAccountData(selectedAccount?.id ?? null);
+
+  const holdingsSummary = useMemo(() => {
+    const holdings = accountData?.holdings ?? [];
+    const totalBuyAmount = holdings.reduce(
+      (sum, h) => sum + Number(h.totalBuyAmount),
+      0,
+    );
+    const totalEvalAmount = holdings.reduce(
+      (sum, h) => sum + Number(h.stock.price) * Number(h.quantity),
+      0,
+    );
+    const totalProfit = totalEvalAmount - totalBuyAmount;
+    const totalProfitRate =
+      totalBuyAmount > 0 ? (totalProfit / totalBuyAmount) * 100 : 0;
+    return { totalBuyAmount, totalEvalAmount, totalProfit, totalProfitRate };
+  }, [accountData?.holdings]);
 
   const [accountTab, setAccountTab] = useState<AccountTab>("계좌");
   const [orderType, setOrderType] = useState<OrderTypeTab>("매수");
@@ -181,7 +241,7 @@ export function TradingPage() {
       }
     };
     fetchStocks();
-    const interval = setInterval(fetchStocks, 150000);
+    const interval = setInterval(fetchStocks, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -341,11 +401,34 @@ export function TradingPage() {
               {accountTab === "계좌" && (
                 <>
                   <div className="mb-3 flex items-center gap-6 pb-2.5">
+                    {!accountData?.account &&
+                      accountLoading &&
+                      [
+                        ["예수금", "w-24"],
+                        ["주문가능금액", "w-24"],
+                        ["총매입금액", "w-24"],
+                        ["총평가금액", "w-24"],
+                        ["평가손익", "w-20"],
+                        ["총수익률", "w-12"],
+                      ].map(([label, width]) => (
+                        <Fragment key={label}>
+                          {/* 현금 그룹과 평가 그룹 사이 구분 */}
+                          {label === "총매입금액" && <GroupDivider />}
+                          <div className="flex min-w-0 flex-col gap-1 mt-1.5">
+                            <span className="text-[10px] leading-none text-zinc-500">
+                              {label}
+                            </span>
+                            <span
+                              className={`mt-0.5 h-3 ${width} animate-pulse rounded bg-[#2b2f36]`}
+                            />
+                          </div>
+                        </Fragment>
+                      ))}
                     {accountData?.account && (
                       <>
                         <div className="flex min-w-0 flex-col gap-1 mt-1.5">
                           <span className="text-[10px] leading-none text-zinc-500">
-                            보유 금액
+                            예수금
                           </span>
                           <span className="inline-block whitespace-nowrap text-xs leading-none text-white font-semibold tabular-nums pt-0.5">
                             {fmtWon(accountData.account.balance)} KRW
@@ -357,6 +440,64 @@ export function TradingPage() {
                           </span>
                           <span className="inline-block whitespace-nowrap text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
                             {fmtWon(accountData.account.availableBalance)} KRW
+                          </span>
+                        </div>
+                        <GroupDivider />
+                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500">
+                            총매입금액
+                          </span>
+                          <span className="inline-block whitespace-nowrap text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
+                            {holdingsSummary.totalBuyAmount.toLocaleString(
+                              "ko-KR",
+                            )}{" "}
+                            KRW
+                          </span>
+                        </div>
+                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500">
+                            총평가금액
+                          </span>
+                          <span className="inline-block whitespace-nowrap text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
+                            {holdingsSummary.totalEvalAmount.toLocaleString(
+                              "ko-KR",
+                            )}{" "}
+                            KRW
+                          </span>
+                        </div>
+                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500">
+                            평가손익
+                          </span>
+                          <span
+                            className={`inline-block whitespace-nowrap text-xs leading-none font-semibold tabular-nums pt-0.5 ${
+                              holdingsSummary.totalProfit > 0
+                                ? "text-[#f6465d]"
+                                : holdingsSummary.totalProfit < 0
+                                  ? "text-[#2563eb]"
+                                  : "text-zinc-200"
+                            }`}
+                          >
+                            {holdingsSummary.totalProfit > 0 ? "+" : ""}
+                            {holdingsSummary.totalProfit.toLocaleString("ko-KR")}{" "}
+                            KRW
+                          </span>
+                        </div>
+                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500">
+                            총수익률
+                          </span>
+                          <span
+                            className={`inline-block whitespace-nowrap text-xs leading-none font-semibold tabular-nums pt-0.5 ${
+                              holdingsSummary.totalProfitRate > 0
+                                ? "text-[#f6465d]"
+                                : holdingsSummary.totalProfitRate < 0
+                                  ? "text-[#2563eb]"
+                                  : "text-zinc-200"
+                            }`}
+                          >
+                            {holdingsSummary.totalProfitRate > 0 ? "+" : ""}
+                            {holdingsSummary.totalProfitRate.toFixed(2)}%
                           </span>
                         </div>
                       </>
@@ -466,16 +607,20 @@ export function TradingPage() {
                           </tr>
                         );
                       })}
-                      {(!accountData || accountData.holdings.length === 0) && (
-                        <tr>
-                          <td
-                            colSpan={8}
-                            className="pt-12 pb-4 text-center text-zinc-500"
-                          >
-                            보유 종목이 없습니다
-                          </td>
-                        </tr>
+                      {accountLoading && !accountData && (
+                        <TableSkeleton columns={8} rows={3} />
                       )}
+                      {!accountLoading &&
+                        (!accountData || accountData.holdings.length === 0) && (
+                          <tr>
+                            <td
+                              colSpan={8}
+                              className="pt-12 pb-4 text-center text-zinc-500"
+                            >
+                              보유 종목이 없습니다
+                            </td>
+                          </tr>
+                        )}
                     </tbody>
                   </table>
                 </>
@@ -543,26 +688,21 @@ export function TradingPage() {
                         </td>
                       </tr>
                     ))}
-                    {(!orderData || orderData.filledOrders.length === 0) && (
-                      <tr>
-                        <td
-                          colSpan={8}
-                          className="pt-12 pb-4 text-center text-zinc-500"
-                        >
-                          체결 내역이 없습니다
-                        </td>
-                      </tr>
+                    {accountLoading && !orderData && (
+                      <TableSkeleton columns={9} />
                     )}
-                    {loadingMoreFilled && (
-                      <tr>
-                        <td
-                          colSpan={9}
-                          className="py-3 text-center text-[11px] text-zinc-500"
-                        >
-                          불러오는 중...
-                        </td>
-                      </tr>
-                    )}
+                    {!accountLoading &&
+                      (!orderData || orderData.filledOrders.length === 0) && (
+                        <tr>
+                          <td
+                            colSpan={9}
+                            className="pt-12 pb-4 text-center text-zinc-500"
+                          >
+                            체결 내역이 없습니다
+                          </td>
+                        </tr>
+                      )}
+                    {loadingMoreFilled && <TableSkeleton columns={9} rows={3} />}
                   </tbody>
                 </table>
               )}
@@ -627,26 +767,21 @@ export function TradingPage() {
                         </tr>
                       );
                     })}
-                    {(!orderData || orderData.openOrders.length === 0) && (
-                      <tr>
-                        <td
-                          colSpan={8}
-                          className="pt-12 pb-4 text-center text-zinc-500"
-                        >
-                          미체결 내역이 없습니다
-                        </td>
-                      </tr>
+                    {accountLoading && !orderData && (
+                      <TableSkeleton columns={8} />
                     )}
-                    {loadingMoreOpen && (
-                      <tr>
-                        <td
-                          colSpan={8}
-                          className="py-3 text-center text-[11px] text-zinc-500"
-                        >
-                          불러오는 중...
-                        </td>
-                      </tr>
-                    )}
+                    {!accountLoading &&
+                      (!orderData || orderData.openOrders.length === 0) && (
+                        <tr>
+                          <td
+                            colSpan={8}
+                            className="pt-12 pb-4 text-center text-zinc-500"
+                          >
+                            미체결 내역이 없습니다
+                          </td>
+                        </tr>
+                      )}
+                    {loadingMoreOpen && <TableSkeleton columns={8} rows={3} />}
                   </tbody>
                 </table>
               )}

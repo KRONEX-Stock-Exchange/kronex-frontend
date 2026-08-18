@@ -114,9 +114,13 @@ export interface AccountData {
 export function useAccountData(accountId: number | null) {
   const [data, setData] = useState<AccountData | null>(null);
   const [orderData, setOrderData] = useState<OrderData | null>(null);
+  const [loading, setLoading] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const priceSockets = useRef<Map<number, Socket>>(new Map());
+  // accountInit 도착 여부를 소켓 콜백에서 확인하기 위한 ref
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   const [openCursor, setOpenCursor] = useState<PageCursor>(undefined);
   const [filledCursor, setFilledCursor] = useState<PageCursor>(undefined);
@@ -192,14 +196,19 @@ export function useAccountData(accountId: number | null) {
 
   // 메인 소켓: 계좌 구독
   useEffect(() => {
-    if (!accountId) return;
+    if (!accountId) {
+      setLoading(false);
+      return;
+    }
 
     setData(null); // 계좌 변경 시 이전 데이터 초기화 → price socket effect 재실행 트리거
     setOrderData(null);
     setOpenCursor(undefined);
     setFilledCursor(undefined);
+    setLoading(true);
 
     let active = true;
+    let initRetryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const connect = () => {
       const newSocket = io(`${REALTIME_URL}/stock`, {
@@ -209,9 +218,23 @@ export function useAccountData(accountId: number | null) {
 
       newSocket.on("connect", () => {
         newSocket.emit("joinAccountRoom", accountId);
+
+        // 연결 직후 accountInit이 오지 않는 경우가 있어 도착할 때까지 몇 번 재요청한다
+        // (이게 없으면 계좌 탭이 영영 빈 화면으로 남는다)
+        let attempts = 0;
+        const retryInit = () => {
+          if (!active || dataRef.current || attempts >= 3) return;
+          attempts += 1;
+          newSocket.emit("joinAccountRoom", accountId);
+          initRetryTimer = setTimeout(retryInit, 2000);
+        };
+        clearTimeout(initRetryTimer);
+        initRetryTimer = setTimeout(retryInit, 2000);
       });
 
       newSocket.on("accountInit", (receivedData: AccountData) => {
+        clearTimeout(initRetryTimer);
+        setLoading(false);
         setData({
           ...receivedData,
           holdings: receivedData.holdings.filter(
@@ -298,6 +321,7 @@ export function useAccountData(accountId: number | null) {
 
     return () => {
       active = false;
+      clearTimeout(initRetryTimer);
       if (socketRef.current) {
         socketRef.current.emit("leaveAccountRoom", accountId);
         socketRef.current.disconnect();
@@ -388,6 +412,7 @@ export function useAccountData(accountId: number | null) {
   return {
     data,
     orderData,
+    loading,
     socket,
     loadMoreOpenOrders,
     loadMoreFilledOrders,
