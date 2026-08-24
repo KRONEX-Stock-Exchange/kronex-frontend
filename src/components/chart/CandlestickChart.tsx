@@ -7,8 +7,14 @@ import {
   LineSeries,
   CrosshairMode,
   TickMarkType,
+  LineStyle,
 } from "lightweight-charts";
-import type { IChartApi, ISeriesApi, LogicalRange } from "lightweight-charts";
+import type {
+  IChartApi,
+  ISeriesApi,
+  LogicalRange,
+  IPriceLine,
+} from "lightweight-charts";
 import { io, Socket } from "socket.io-client";
 import { apiClient } from "../../services/api/client";
 import { REALTIME_URL } from "../../constants";
@@ -22,7 +28,7 @@ const CHART_TYPES: { label: string; value: ChartType }[] = [
   { label: "15분", value: "15m" },
   { label: "30분", value: "30m" },
   { label: "1시간", value: "1h" },
-  { label: "일", value: "1d" },
+  { label: "1일", value: "1d" },
 ];
 
 const MA_CONFIGS = [
@@ -118,14 +124,20 @@ function parseCandle(item: CandleItem, type: ChartType): ParsedCandle {
 function computeMA(closes: number[], period: number): (number | null)[] {
   return closes.map((_, i) => {
     if (i < period - 1) return null;
-    return closes.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
+    return (
+      closes.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period
+    );
   });
 }
 
 // lightweight-charts가 day 타입일 때 param.time을 {year,month,day} 객체로 줌
 function paramTimeToKey(t: unknown): string {
   if (typeof t === "object" && t !== null) {
-    const { year, month, day } = t as { year: number; month: number; day: number };
+    const { year, month, day } = t as {
+      year: number;
+      month: number;
+      day: number;
+    };
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
   return String(t);
@@ -133,12 +145,33 @@ function paramTimeToKey(t: unknown): string {
 
 interface CandlestickChartProps {
   stockId: number | null;
+  avgPrice?: number | null;
 }
 
-export function CandlestickChart({ stockId }: CandlestickChartProps) {
+// 설정 패널용 토글 스위치. 네이티브 체크박스(accent-color)는 켜졌을 때 통짜 색으로
+// 칠해져 앰버 하나만 있어도 튀는데, 7개가 한꺼번에 켜지면 패널 전체가 번쩍여서
+// "표시 방향" 세그먼트 버튼과 같은 톤(무채색 회색조)으로 통일한다.
+function ToggleSwitch({ checked }: { checked: boolean }) {
+  return (
+    <span
+      className={`relative inline-flex h-4.5 w-8 shrink-0 rounded-full transition-colors ${
+        checked ? "bg-zinc-500" : "bg-[#2b2f36]"
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+          checked ? "translate-x-3.5" : ""
+        }`}
+      />
+    </span>
+  );
+}
+
+export function CandlestickChart({ stockId, avgPrice }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const avgPriceLineRef = useRef<IPriceLine | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const maSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const legendRef = useRef<HTMLDivElement>(null);
@@ -159,12 +192,16 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
   const lastPriceMarkerRef = useRef<HTMLDivElement>(null);
   const lastPriceValueRef = useRef<HTMLSpanElement>(null);
   const lastPricePctRef = useRef<HTMLSpanElement>(null);
+  const avgPriceLabelRef = useRef<HTMLDivElement>(null);
   const [chartType, setChartType] = useState<ChartType>("1d");
   const [chartLoading, setChartLoading] = useState(true);
   const [showMinMax, setShowMinMax] = useState(true);
   const showMinMaxRef = useRef(showMinMax);
+  const [showAvgPrice, setShowAvgPrice] = useState(false);
+  const showAvgPriceRef = useRef(showAvgPrice);
+  const avgPriceRef = useRef(avgPrice);
   const [legendOptions, setLegendOptions] = useState<LegendOptions>({
-    ma: true,
+    ma: false,
     high: true,
     low: true,
     open: true,
@@ -172,7 +209,9 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     volume: true,
   });
   const legendOptionsRef = useRef(legendOptions);
-  const [legendLayout, setLegendLayout] = useState<"horizontal" | "vertical">("vertical");
+  const [legendLayout, setLegendLayout] = useState<"horizontal" | "vertical">(
+    "horizontal",
+  );
   const legendLayoutRef = useRef(legendLayout);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -193,14 +232,19 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     // 라이브러리가 제공하는 barsInLogicalRange로 실제 마지막 가시 봉의 시각을 구한다.
     const sorted = sortedRef.current;
     const range = chart.timeScale().getVisibleLogicalRange();
-    let last: ParsedCandle | undefined;
+    let lastIndex = -1;
     if (!range) {
-      last = sorted[sorted.length - 1];
+      lastIndex = sorted.length - 1;
     } else {
       const barsInfo = series.barsInLogicalRange(range);
-      const toKey = barsInfo?.to !== undefined ? paramTimeToKey(barsInfo.to) : undefined;
-      last = toKey !== undefined ? sorted.find((c) => String(c.chartTime) === toKey) : undefined;
+      const toKey =
+        barsInfo?.to !== undefined ? paramTimeToKey(barsInfo.to) : undefined;
+      lastIndex =
+        toKey !== undefined
+          ? sorted.findIndex((c) => String(c.chartTime) === toKey)
+          : -1;
     }
+    const last = lastIndex >= 0 ? sorted[lastIndex] : undefined;
     if (!last) {
       badge.style.display = "none";
       return;
@@ -212,25 +256,60 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       return;
     }
 
-    // 캔들 색과 같은 기준(종가 vs 시가)으로 색을 정해야 봉 색과 라벨 색이 어긋나지 않는다
-    const isUp = last.close >= last.open;
-    const pct = last.open > 0 ? ((last.close - last.open) / last.open) * 100 : 0;
+    // 등락은 크로스헤어 범례와 같은 기준(직전 봉 종가 대비)으로 계산하고, 색도 그 부호를 따른다.
+    // 첫 봉은 비교할 직전 봉이 없으므로 자기 시가를 기준으로 둔다.
+    const baseline = lastIndex > 0 ? sorted[lastIndex - 1].close : last.open;
+    const isUp = last.close >= baseline;
+    const pct =
+      baseline > 0 ? ((last.close - baseline) / baseline) * 100 : 0;
 
     badge.style.display = "flex";
     badge.style.left = `${container.clientWidth - chart.priceScale("right").width()}px`;
     badge.style.top = `${y}px`;
     badge.style.backgroundColor = isUp ? "#f6465d" : "#2563eb";
     if (lastPriceValueRef.current) {
-      lastPriceValueRef.current.textContent = Math.round(last.close).toLocaleString("ko-KR");
+      lastPriceValueRef.current.textContent = Math.round(
+        last.close,
+      ).toLocaleString("ko-KR");
     }
     if (lastPricePctRef.current) {
       lastPricePctRef.current.textContent = `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
     }
   };
 
+  // 평단가 선의 왼쪽 끝에 "매입가" 태그를 띄운다 (가격 자체는 오른쪽 가격축에 표시)
+  const updateAvgPriceLabel = () => {
+    const series = candleSeriesRef.current;
+    const label = avgPriceLabelRef.current;
+    const container = containerRef.current;
+    if (!series || !label || !container) return;
+
+    const price = avgPriceRef.current;
+    if (!showAvgPriceRef.current || !price || price <= 0) {
+      label.style.display = "none";
+      return;
+    }
+
+    const y = series.priceToCoordinate(price);
+    if (y === null) {
+      label.style.display = "none";
+      return;
+    }
+
+    // translateY(-50%)로 중앙 정렬되므로, 값이 차트 상/하단 끝에 가까우면
+    // 라벨 절반이 차트 영역 밖(툴바 쪽)으로 튀어나가지 않도록 위치를 clamp한다
+    const half = label.offsetHeight / 2;
+    const clampedY = Math.min(Math.max(y, half), container.clientHeight - half);
+
+    label.style.display = "block";
+    label.style.left = "0px";
+    label.style.top = `${clampedY}px`;
+  };
+
   // 화면에 보이는 구간의 최고/최저 캔들 위치에 작은 화살표 라벨을 띄운다
   const updateMinMaxLines = () => {
     updateLastPriceBadge();
+    updateAvgPriceLabel();
 
     const series = candleSeriesRef.current;
     const chart = chartRef.current;
@@ -255,10 +334,18 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     // 여기도 range.from/to를 직접 ceil/floor하면 봉 경계에서 옆 봉이 섞여 들어갈 수 있어
     // badge와 동일하게 barsInLogicalRange가 알려주는 실제 첫/마지막 가시 봉의 시각으로 인덱스를 찾는다.
     const barsInfo = series.barsInLogicalRange(range);
-    const fromKey = barsInfo?.from !== undefined ? paramTimeToKey(barsInfo.from) : undefined;
-    const toKey = barsInfo?.to !== undefined ? paramTimeToKey(barsInfo.to) : undefined;
-    const from = fromKey !== undefined ? sorted.findIndex((c) => String(c.chartTime) === fromKey) : -1;
-    const to = toKey !== undefined ? sorted.findIndex((c) => String(c.chartTime) === toKey) : -1;
+    const fromKey =
+      barsInfo?.from !== undefined ? paramTimeToKey(barsInfo.from) : undefined;
+    const toKey =
+      barsInfo?.to !== undefined ? paramTimeToKey(barsInfo.to) : undefined;
+    const from =
+      fromKey !== undefined
+        ? sorted.findIndex((c) => String(c.chartTime) === fromKey)
+        : -1;
+    const to =
+      toKey !== undefined
+        ? sorted.findIndex((c) => String(c.chartTime) === toKey)
+        : -1;
     if (from < 0 || to < 0 || from > to) {
       highEl.style.display = "none";
       lowEl.style.display = "none";
@@ -282,7 +369,9 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     // 캔들이 화면 가장자리에 있으면 라벨이 밖으로 잘리므로, 공간이 없는 쪽이면 반대편으로 뒤집는다.
     // (DOM 순서는 [라벨, 화살표] 고정. row-reverse로 좌우를 바꾸고 화살표는 scaleX로 뒤집는다)
     const plotLeft = 0;
-    const plotRight = (containerRef.current?.clientWidth ?? 0) - chart.priceScale("right").width();
+    const plotRight =
+      (containerRef.current?.clientWidth ?? 0) -
+      chart.priceScale("right").width();
 
     const placeMarker = (
       el: HTMLDivElement,
@@ -300,17 +389,22 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       // 선호하는 쪽에 공간이 없고 반대쪽에는 있으면 뒤집는다
       let onLeft = preferLeft;
       if (preferLeft && x - w < plotLeft && x + w <= plotRight) onLeft = false;
-      else if (!preferLeft && x + w > plotRight && x - w >= plotLeft) onLeft = true;
+      else if (!preferLeft && x + w > plotRight && x - w >= plotLeft)
+        onLeft = true;
 
       el.style.flexDirection = onLeft ? "row" : "row-reverse";
-      el.style.transform = onLeft ? "translate(-100%, -50%)" : "translate(0, -50%)";
+      el.style.transform = onLeft
+        ? "translate(-100%, -50%)"
+        : "translate(0, -50%)";
       if (arrowEl) arrowEl.style.transform = onLeft ? "" : "scaleX(-1)";
       // 화살표 끝이 봉에 딱 닿지 않도록 살짝 띄운다
       el.style.left = `${onLeft ? x - MARKER_GAP : x + MARKER_GAP}px`;
       el.style.top = `${y}px`;
     };
 
-    const highX = chart.timeScale().timeToCoordinate(highCandle.chartTime as never);
+    const highX = chart
+      .timeScale()
+      .timeToCoordinate(highCandle.chartTime as never);
     const highY = series.priceToCoordinate(highCandle.high);
     if (highX === null || highY === null) {
       highEl.style.display = "none";
@@ -326,7 +420,9 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       );
     }
 
-    const lowX = chart.timeScale().timeToCoordinate(lowCandle.chartTime as never);
+    const lowX = chart
+      .timeScale()
+      .timeToCoordinate(lowCandle.chartTime as never);
     const lowY = series.priceToCoordinate(lowCandle.low);
     if (lowX === null || lowY === null) {
       lowEl.style.display = "none";
@@ -349,6 +445,12 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
   }, [showMinMax]);
 
   useEffect(() => {
+    showAvgPriceRef.current = showAvgPrice;
+    avgPriceRef.current = avgPrice;
+    updateMinMaxLines();
+  }, [showAvgPrice, avgPrice]);
+
+  useEffect(() => {
     legendOptionsRef.current = legendOptions;
   }, [legendOptions]);
 
@@ -359,7 +461,10 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
   useEffect(() => {
     if (!settingsOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+      if (
+        settingsRef.current &&
+        !settingsRef.current.contains(e.target as Node)
+      ) {
         setSettingsOpen(false);
       }
     };
@@ -374,7 +479,11 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
 
     const fmtDatePart = (time: unknown) => {
       if (typeof time === "object" && time !== null) {
-        const { year, month, day } = time as { year: number; month: number; day: number };
+        const { year, month, day } = time as {
+          year: number;
+          month: number;
+          day: number;
+        };
         return `${year}.${String(month).padStart(2, "0")}.${String(day).padStart(2, "0")}`;
       }
       // 일봉은 "yyyy-mm-dd" 형식의 BusinessDay 문자열로 넘어올 수 있다
@@ -458,14 +567,17 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       wickDownColor: "#2563eb",
       priceFormat: {
         type: "custom",
-        formatter: (price: number) => price < 0 ? "" : price.toLocaleString("ko-KR"),
+        formatter: (price: number) =>
+          price < 0 ? "" : price.toLocaleString("ko-KR"),
         minMove: 1,
       },
       // 가격+등락률을 한 네모로 직접 그리므로 기본 라벨은 끈다 (updateLastPriceBadge 참고)
       lastValueVisible: false,
     });
     // right 스케일: 하단 30% 비워서 volume 영역 확보
-    candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: 0.30 } });
+    candleSeries
+      .priceScale()
+      .applyOptions({ scaleMargins: { top: 0.05, bottom: 0.3 } });
     candleSeriesRef.current = candleSeries;
 
     // 거래량: left 스케일 사용 + 레이블 숨김 → right 축에 아무 영향 없음
@@ -489,7 +601,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         lastValueVisible: false,
         crosshairMarkerVisible: false,
         autoscaleInfoProvider: () => null,
-      })
+      }),
     );
     maSeriesRef.current = maSeries;
 
@@ -501,14 +613,27 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         legend.style.display = "none";
         return;
       }
-      const ohlc = param.seriesData.get(candleSeries) as { open: number; high: number; low: number; close: number };
-      const vol = (param.seriesData.get(volumeSeries) as { value: number } | undefined)?.value ?? 0;
-      if (!ohlc) { legend.style.display = "none"; return; }
+      const ohlc = param.seriesData.get(candleSeries) as {
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+      };
+      const vol =
+        (param.seriesData.get(volumeSeries) as { value: number } | undefined)
+          ?.value ?? 0;
+      if (!ohlc) {
+        legend.style.display = "none";
+        return;
+      }
 
       const key = paramTimeToKey(param.time);
-      const idx = sortedRef.current.findIndex((c) => String(c.chartTime) === key);
+      const idx = sortedRef.current.findIndex(
+        (c) => String(c.chartTime) === key,
+      );
       const prevClose = idx > 0 ? sortedRef.current[idx - 1].close : ohlc.open;
-      const pct = (v: number) => prevClose > 0 ? ((v - prevClose) / prevClose) * 100 : 0;
+      const pct = (v: number) =>
+        prevClose > 0 ? ((v - prevClose) / prevClose) * 100 : 0;
       const fmtPct = (p: number) => `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
       const col = (p: number) => (p >= 0 ? "#f6465d" : "#2563eb");
 
@@ -518,12 +643,15 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       // 항목(시/고/저/종/거래량/MA) 하나를 나타내는 html 조각. 항목 간 간격은
       // 부모 컨테이너의 gap이 담당하므로 여기서는 margin을 쓰지 않는다.
       const cell = (label: string, v: number) => {
-        const p = pct(v); const c = col(p);
-        return `<div style="display:flex;align-items:center;gap:2px">` +
+        const p = pct(v);
+        const c = col(p);
+        return (
+          `<div style="display:flex;align-items:center;gap:2px">` +
           `<span style="color:#848e9c">${label}</span>` +
           `<span style="color:${c}">${v.toLocaleString()}</span>` +
           `<span style="color:${c};font-size:10px">(${fmtPct(p)})</span>` +
-          `</div>`;
+          `</div>`
+        );
       };
 
       const items: string[] = [];
@@ -536,12 +664,13 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
           `<div style="display:flex;align-items:center;gap:2px">` +
             `<span style="color:#848e9c">거래량</span>` +
             `<span style="color:#aaa">${Math.round(vol).toLocaleString()}</span>` +
-            `</div>`
+            `</div>`,
         );
       }
       if (opts.ma) {
         const maSpans = MA_CONFIGS.map((ma, i) => {
-          const v = param.seriesData.get(maSeries[i]) as { value: number } | undefined;
+          const v = param.seriesData.get(maSeries[i]) as
+            { value: number } | undefined;
           return v
             ? `<span style="color:${ma.color}">MA${ma.period} ${Math.round(v.value).toLocaleString()}</span>`
             : "";
@@ -550,11 +679,16 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         if (layout === "vertical") {
           items.push(...maSpans);
         } else if (maSpans.length > 0) {
-          items.push(`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${maSpans.join("")}</div>`);
+          items.push(
+            `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${maSpans.join("")}</div>`,
+          );
         }
       }
 
-      if (items.length === 0) { legend.style.display = "none"; return; }
+      if (items.length === 0) {
+        legend.style.display = "none";
+        return;
+      }
 
       legend.style.display = "flex";
       legend.style.flexDirection = layout === "vertical" ? "column" : "row";
@@ -565,7 +699,10 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     });
 
     const handleResize = () => {
-      chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+      chart.applyOptions({
+        width: container.clientWidth,
+        height: container.clientHeight,
+      });
     };
     window.addEventListener("resize", handleResize);
 
@@ -580,10 +717,14 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     let draggingPriceAxis = false;
     const onPointerDown = (e: PointerEvent) => {
       const axisW = chartRef.current?.priceScale("right").width() ?? 55;
-      draggingPriceAxis = e.clientX >= container.getBoundingClientRect().right - axisW;
+      draggingPriceAxis =
+        e.clientX >= container.getBoundingClientRect().right - axisW;
     };
     const onPointerMove = (e: PointerEvent) => {
-      if (!draggingPriceAxis || !(e.buttons & 1)) { draggingPriceAxis = false; return; }
+      if (!draggingPriceAxis || !(e.buttons & 1)) {
+        draggingPriceAxis = false;
+        return;
+      }
       const cs = candleSeriesRef.current;
       const minRange = autoScaleRangeRef.current;
       if (!cs || minRange === null) return;
@@ -591,12 +732,18 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         const h = container.clientHeight;
         const top = cs.coordinateToPrice(0);
         const bot = cs.coordinateToPrice(h);
-        if (top !== null && bot !== null && Math.abs(top - bot) < minRange * 0.97) {
+        if (
+          top !== null &&
+          bot !== null &&
+          Math.abs(top - bot) < minRange * 0.97
+        ) {
           cs.priceScale().applyOptions({ autoScale: true });
         }
       });
     };
-    const onPointerUp = () => { draggingPriceAxis = false; };
+    const onPointerUp = () => {
+      draggingPriceAxis = false;
+    };
     container.addEventListener("pointerdown", onPointerDown);
     container.addEventListener("pointermove", onPointerMove);
     container.addEventListener("pointerup", onPointerUp);
@@ -611,6 +758,36 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       chartRef.current = null;
     };
   }, []);
+
+  // 평단가 선: 옵션이 켜져 있고 보유 중인 종목(avgPrice 존재)이면 가격선을 그리고,
+  // 아니면 지워둔다. 종목 전환으로 avgPrice가 바뀌면 선 위치만 갱신한다.
+  // 가격 값은 오른쪽 가격축 라벨 박스(axisLabelVisible)로, "매입가" 태그는 왼쪽에 별도로 띄운다.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    if (!showAvgPrice || !avgPrice || avgPrice <= 0) {
+      if (avgPriceLineRef.current) {
+        series.removePriceLine(avgPriceLineRef.current);
+        avgPriceLineRef.current = null;
+      }
+      return;
+    }
+
+    if (avgPriceLineRef.current) {
+      avgPriceLineRef.current.applyOptions({ price: avgPrice });
+    } else {
+      avgPriceLineRef.current = series.createPriceLine({
+        price: avgPrice,
+        color: "#6b7280",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        axisLabelColor: "#6b7280",
+        axisLabelTextColor: "#ffffff",
+      });
+    }
+  }, [showAvgPrice, avgPrice]);
 
   // 데이터 로딩 + 소켓 (stockId, chartType 변경 시 재실행)
   useEffect(() => {
@@ -637,7 +814,10 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
     // scrollToLatest: 과거 데이터 추가 로드(무한 스크롤) 시에는 false로 호출해 스크롤 위치 유지
     const applyAllData = (scrollToLatest = true) => {
       const sorted = Array.from(candleMapRef.current.values()).sort((a, b) => {
-        if (typeof a.chartTime === "number" && typeof b.chartTime === "number") {
+        if (
+          typeof a.chartTime === "number" &&
+          typeof b.chartTime === "number"
+        ) {
           return a.chartTime - b.chartTime;
         }
         return String(a.chartTime).localeCompare(String(b.chartTime));
@@ -648,20 +828,31 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       const maArrays = MA_CONFIGS.map((ma) => computeMA(closes, ma.period));
 
       candleSeries.setData(
-        sorted.map((c) => ({ time: c.chartTime as never, open: c.open, high: c.high, low: c.low, close: c.close }))
+        sorted.map((c) => ({
+          time: c.chartTime as never,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        })),
       );
       volumeSeries.setData(
         sorted.map((c) => ({
           time: c.chartTime as never,
           value: c.volume,
-          color: c.close >= c.open ? "rgba(246,70,93,0.5)" : "rgba(37,99,235,0.5)",
-        }))
+          color:
+            c.close >= c.open ? "rgba(246,70,93,0.5)" : "rgba(37,99,235,0.5)",
+        })),
       );
       maArrays.forEach((arr, i) => {
         maSeries[i].setData(
           sorted
-            .map((c, j) => (arr[j] !== null ? { time: c.chartTime as never, value: arr[j]! } : null))
-            .filter((d): d is NonNullable<typeof d> => d !== null)
+            .map((c, j) =>
+              arr[j] !== null
+                ? { time: c.chartTime as never, value: arr[j]! }
+                : null,
+            )
+            .filter((d): d is NonNullable<typeof d> => d !== null),
         );
       });
 
@@ -675,7 +866,8 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         if (!cs || !cont) return;
         const top = cs.coordinateToPrice(0);
         const bot = cs.coordinateToPrice(cont.clientHeight);
-        if (top !== null && bot !== null) autoScaleRangeRef.current = Math.abs(top - bot);
+        if (top !== null && bot !== null)
+          autoScaleRangeRef.current = Math.abs(top - bot);
       });
     };
 
@@ -693,7 +885,9 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       }
 
       // 기존 봉 업데이트: sortedRef에서 해당 항목 찾아 교체
-      const existingIdx = sortedRef.current.findIndex((c) => c.candleTime === item.candleTime);
+      const existingIdx = sortedRef.current.findIndex(
+        (c) => c.candleTime === item.candleTime,
+      );
       if (existingIdx >= 0) sortedRef.current[existingIdx] = parsed;
 
       const sorted = sortedRef.current;
@@ -701,16 +895,28 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       const idx = existingIdx >= 0 ? existingIdx : sorted.length - 1;
 
       try {
-        candleSeries.update({ time: parsed.chartTime as never, open: parsed.open, high: parsed.high, low: parsed.low, close: parsed.close });
+        candleSeries.update({
+          time: parsed.chartTime as never,
+          open: parsed.open,
+          high: parsed.high,
+          low: parsed.low,
+          close: parsed.close,
+        });
         volumeSeries.update({
           time: parsed.chartTime as never,
           value: parsed.volume,
-          color: parsed.close >= parsed.open ? "rgba(246,70,93,0.5)" : "rgba(37,99,235,0.5)",
+          color:
+            parsed.close >= parsed.open
+              ? "rgba(246,70,93,0.5)"
+              : "rgba(37,99,235,0.5)",
         });
         MA_CONFIGS.forEach((ma, i) => {
           if (idx >= ma.period - 1) {
             const slice = closes.slice(idx - ma.period + 1, idx + 1);
-            maSeries[i].update({ time: parsed.chartTime as never, value: slice.reduce((a, b) => a + b, 0) / ma.period });
+            maSeries[i].update({
+              time: parsed.chartTime as never,
+              value: slice.reduce((a, b) => a + b, 0) / ma.period,
+            });
           }
         });
       } catch {
@@ -785,12 +991,13 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
       try {
         const cursor = encodeURIComponent(nextCursorRef.current);
         const res = await apiClient.get<ChartApiResponse>(
-          `/stocks/${stockId}/chart?type=${chartType}&cursor=${cursor}`
+          `/stocks/${stockId}/chart?type=${chartType}&cursor=${cursor}`,
         );
         if (!active || !res.success || !res.data) return;
 
         const prevBarCount = sortedRef.current.length;
-        const visibleRange = chartRef.current?.timeScale().getVisibleLogicalRange() ?? null;
+        const visibleRange =
+          chartRef.current?.timeScale().getVisibleLogicalRange() ?? null;
 
         for (const c of res.data.candles) {
           candleMapRef.current.set(c.candleTime, parseCandle(c, chartType));
@@ -822,12 +1029,16 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         loadMoreHistory();
       }
     };
-    chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+    chartRef.current
+      ?.timeScale()
+      .subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
 
     const init = async () => {
       candleMapRef.current.clear();
       sortedRef.current = [];
-      const res = await apiClient.get<ChartApiResponse>(`/stocks/${stockId}/chart?type=${chartType}`);
+      const res = await apiClient.get<ChartApiResponse>(
+        `/stocks/${stockId}/chart?type=${chartType}`,
+      );
       if (!active) return;
 
       if (res.success && res.data) {
@@ -849,7 +1060,9 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
 
     return () => {
       active = false;
-      chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+      chartRef.current
+        ?.timeScale()
+        .unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
       if (socketRef.current) {
         socketRef.current.emit("leaveChartRoom", { stockId, type: chartType });
         socketRef.current.disconnect();
@@ -879,7 +1092,11 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         </div>
         <div className="flex items-center gap-3 ml-3 border-l border-[#2b2f36] pl-3">
           {MA_CONFIGS.map((ma) => (
-            <span key={ma.period} className="text-[10px]" style={{ color: ma.color }}>
+            <span
+              key={ma.period}
+              className="text-[10px]"
+              style={{ color: ma.color }}
+            >
               MA{ma.period}
             </span>
           ))}
@@ -890,26 +1107,53 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
             onClick={() => setSettingsOpen((v) => !v)}
             aria-label="차트 설정"
             className={`flex items-center justify-center w-6 h-6 rounded-md transition-colors ${
-              settingsOpen ? "bg-[#2b2f36] text-white" : "text-zinc-500 hover:text-zinc-300"
+              settingsOpen
+                ? "bg-[#2b2f36] text-white"
+                : "text-zinc-500 hover:text-zinc-300"
             }`}
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
+            <svg
+              className="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 15a3 3 0 100-6 3 3 0 000 6z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"
+              />
             </svg>
           </button>
 
-          {settingsOpen && (
-            <div className="absolute top-full right-0 mt-1.5 w-44 bg-[#181a20] border border-[#2b2f36] rounded-lg shadow-2xl overflow-hidden z-50 p-2">
-              <label className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer">
+          <div
+            className={`absolute top-full right-0 mt-1.5 z-50 grid w-44 transition-[grid-template-rows,opacity] duration-200 ease-out ${
+              settingsOpen
+                ? "grid-rows-[1fr] opacity-100"
+                : "grid-rows-[0fr] opacity-0 pointer-events-none"
+            }`}
+          >
+            <div className="overflow-hidden bg-[#181a20] border border-[#2b2f36] rounded-lg shadow-2xl p-2">
+              <div
+                onClick={() => setShowMinMax((v) => !v)}
+                className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer"
+              >
                 고점/저점 표시
-                <input
-                  type="checkbox"
-                  checked={showMinMax}
-                  onChange={(e) => setShowMinMax(e.target.checked)}
-                  className="accent-[#F59E0B]"
-                />
-              </label>
+                <ToggleSwitch checked={showMinMax} />
+              </div>
+              <div
+                onClick={() => setShowAvgPrice((v) => !v)}
+                className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer"
+              >
+                매입가 표시
+                <ToggleSwitch checked={showAvgPrice} />
+              </div>
               <div className="my-1 border-t border-[#2b2f36]" />
               <div className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300">
                 표시 방향
@@ -917,7 +1161,9 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
                   <button
                     onClick={() => setLegendLayout("horizontal")}
                     className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
-                      legendLayout === "horizontal" ? "bg-[#2b2f36] text-white" : "text-zinc-500 hover:text-zinc-300"
+                      legendLayout === "horizontal"
+                        ? "bg-[#2b2f36] text-white"
+                        : "text-zinc-500 hover:text-zinc-300"
                     }`}
                   >
                     가로
@@ -925,7 +1171,9 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
                   <button
                     onClick={() => setLegendLayout("vertical")}
                     className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
-                      legendLayout === "vertical" ? "bg-[#2b2f36] text-white" : "text-zinc-500 hover:text-zinc-300"
+                      legendLayout === "vertical"
+                        ? "bg-[#2b2f36] text-white"
+                        : "text-zinc-500 hover:text-zinc-300"
                     }`}
                   >
                     세로
@@ -934,23 +1182,22 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
               </div>
               <div className="my-1 border-t border-[#2b2f36]" />
               {LEGEND_TOGGLES.map(({ key, label }) => (
-                <label
+                <div
                   key={key}
+                  onClick={() =>
+                    setLegendOptions((prev) => ({
+                      ...prev,
+                      [key]: !prev[key],
+                    }))
+                  }
                   className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer"
                 >
                   {label}
-                  <input
-                    type="checkbox"
-                    checked={legendOptions[key]}
-                    onChange={(e) =>
-                      setLegendOptions((prev) => ({ ...prev, [key]: e.target.checked }))
-                    }
-                    className="accent-[#F59E0B]"
-                  />
-                </label>
+                  <ToggleSwitch checked={legendOptions[key]} />
+                </div>
               ))}
             </div>
-          )}
+          </div>
         </div>
       </div>
       {/* 차트 영역 */}
@@ -958,7 +1205,7 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
         {/* OHLCV + MA 범례 (크로스헤어 이동 시 표시) */}
         <div
           ref={legendRef}
-          className="absolute top-1 left-1 z-10 text-xs pointer-events-none"
+          className="absolute top-1 left-1 z-30 text-xs pointer-events-none"
           style={{ display: "none" }}
         />
         {/* 화면에 보이는 구간의 최고가 화살표 라벨 (기본: 캔들 왼쪽) */}
@@ -970,25 +1217,56 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
           <span
             ref={highMarkerLabelRef}
             className="whitespace-nowrap text-[9px] font-medium text-[#f6465d]"
-            style={{ textShadow: "0 0 4px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)" }}
+            style={{
+              textShadow: "0 0 4px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)",
+            }}
           />
-          <svg ref={highArrowRef} className="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="none">
-            <path d="M1 6H10.6M10.6 6L7.4 3.9M10.6 6L7.4 8.1" stroke="#f6465d" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
+          <svg
+            ref={highArrowRef}
+            className="w-3 h-3 shrink-0"
+            viewBox="0 0 12 12"
+            fill="none"
+          >
+            <path
+              d="M1 6H10.6M10.6 6L7.4 3.9M10.6 6L7.4 8.1"
+              stroke="#f6465d"
+              strokeWidth={1.2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </div>
         {/* 화면에 보이는 구간의 최저가 화살표 라벨 (기본: 캔들 오른쪽) */}
         <div
           ref={lowMarkerRef}
           className="absolute z-20 flex items-center gap-0.5 pointer-events-none"
-          style={{ display: "none", flexDirection: "row-reverse", transform: "translate(0, -50%)" }}
+          style={{
+            display: "none",
+            flexDirection: "row-reverse",
+            transform: "translate(0, -50%)",
+          }}
         >
           <span
             ref={lowMarkerLabelRef}
             className="whitespace-nowrap text-[9px] font-medium text-[#2563eb]"
-            style={{ textShadow: "0 0 4px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)" }}
+            style={{
+              textShadow: "0 0 4px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)",
+            }}
           />
-          <svg ref={lowArrowRef} className="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="none" style={{ transform: "scaleX(-1)" }}>
-            <path d="M1 6H10.6M10.6 6L7.4 3.9M10.6 6L7.4 8.1" stroke="#2563eb" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
+          <svg
+            ref={lowArrowRef}
+            className="w-3 h-3 shrink-0"
+            viewBox="0 0 12 12"
+            fill="none"
+            style={{ transform: "scaleX(-1)" }}
+          >
+            <path
+              d="M1 6H10.6M10.6 6L7.4 3.9M10.6 6L7.4 8.1"
+              stroke="#2563eb"
+              strokeWidth={1.2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </div>
         {/* 현재가 라벨 — 가격 + 등락률을 한 네모에 두 줄로 */}
@@ -997,10 +1275,24 @@ export function CandlestickChart({ stockId }: CandlestickChartProps) {
           className="absolute z-20 flex flex-col items-center justify-center rounded-none px-1.5 py-0.5 pointer-events-none"
           style={{ display: "none", transform: "translateY(-50%)" }}
         >
-          <span ref={lastPriceValueRef} className="whitespace-nowrap text-[11px] font-bold leading-tight text-white" />
-          <span ref={lastPricePctRef} className="whitespace-nowrap text-[11px] font-bold leading-tight text-white" />
+          <span
+            ref={lastPriceValueRef}
+            className="whitespace-nowrap text-[11px] font-bold leading-tight text-white"
+          />
+          <span
+            ref={lastPricePctRef}
+            className="whitespace-nowrap text-[11px] font-bold leading-tight text-white"
+          />
         </div>
-<div ref={containerRef} className="w-full h-full" />
+        {/* 평단가 선 왼쪽 끝에 뜨는 "매입가" 태그 (가격 값은 오른쪽 가격축 라벨에 표시) */}
+        <div
+          ref={avgPriceLabelRef}
+          className="absolute z-20 whitespace-nowrap rounded-none bg-[#6b7280] px-1.5 py-0.5 text-[11px] font-bold text-white pointer-events-none"
+          style={{ display: "none", transform: "translateY(-50%)" }}
+        >
+          매입가
+        </div>
+        <div ref={containerRef} className="w-full h-full" />
 
         {/* API 서버 + realtime 서버 데이터가 모두 도착할 때까지 덮어둔다 */}
         {chartLoading && (

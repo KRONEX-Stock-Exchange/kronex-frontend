@@ -6,6 +6,7 @@ export interface ToastData {
   type: "success" | "error";
 }
 
+// 손익·등락률 표기와 같은 계열의 색을 쓴다
 const ACCENT = {
   success: "#0ecb81",
   error: "#f6465d",
@@ -13,9 +14,19 @@ const ACCENT = {
 
 function Icon({ type }: { type: ToastData["type"] }) {
   return (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+    <svg
+      className="w-3 h-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={3}
+    >
       {type === "success" ? (
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 12.5l5.5 5.5L20 7" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 12.5l5.5 5.5L20 7"
+        />
       ) : (
         <>
           <path strokeLinecap="round" d="M12 6v8" />
@@ -50,38 +61,35 @@ export function Toast({
     <div
       role="status"
       aria-live="polite"
-      className={`fixed bottom-6 left-1/2 z-50 flex max-w-[90vw] items-stretch overflow-hidden rounded-xl border border-[#2b2f36] bg-[#181a20] shadow-2xl transition-[opacity,transform] duration-300 ease-out ${
+      className={`fixed bottom-5 left-1/2 z-50 flex max-w-[90vw] items-center gap-2.5 rounded-xl border border-[#21242b] bg-[#181a20] pl-3.5 pr-2 py-2.5 shadow-lg shadow-black/40 transition-[opacity,transform] duration-300 ease-out ${
         visible ? "opacity-100" : "opacity-0"
       }`}
       style={{
-        transform: `translateX(-50%) translateY(${visible ? "0px" : "12px"}) scale(${visible ? 1 : 0.97})`,
+        transform: `translateX(-50%) translateY(${visible ? "0px" : "8px"})`,
       }}
     >
-      {/* 좌측 상태 색상 바 */}
-      <span className="w-1 shrink-0" style={{ backgroundColor: accent }} />
+      {/* 상태는 아이콘 색으로만 알린다 (다른 패널처럼 색은 최소한으로) */}
+      <span className="shrink-0" style={{ color: accent }}>
+        <Icon type={toast.type} />
+      </span>
 
-      <div className="flex items-center gap-2.5 py-3 pl-3 pr-2">
-        <span
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-          style={{ backgroundColor: `${accent}1f`, color: accent }}
+      <p className="text-xs leading-snug text-zinc-200">{toast.message}</p>
+
+      <button
+        onClick={onClose}
+        aria-label="닫기"
+        className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-zinc-600 transition-colors hover:bg-[#1f232b] hover:text-zinc-300"
+      >
+        <svg
+          className="w-2.5 h-2.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.5}
         >
-          <Icon type={toast.type} />
-        </span>
-
-        <p className="text-[13px] font-medium leading-snug text-zinc-100">
-          {toast.message}
-        </p>
-
-        <button
-          onClick={onClose}
-          aria-label="닫기"
-          className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-600 transition-colors hover:bg-[#1f232b] hover:text-zinc-300"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+          <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      </button>
     </div>
   );
 }

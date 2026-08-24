@@ -1,5 +1,10 @@
 import { useRef, useEffect, useState } from "react";
-import type { OrderbookData, OrderbookItem, MatchItem, StockInfo } from "../../hooks/useOrderbook";
+import type {
+  OrderbookData,
+  OrderbookItem,
+  MatchItem,
+  StockInfo,
+} from "../../hooks/useOrderbook";
 import { Tick, EmptyTick, SkeletonTick } from "./tick";
 
 const toNum = (s: string | undefined | null) => {
@@ -8,10 +13,13 @@ const toNum = (s: string | undefined | null) => {
 };
 
 const MAX_TICKS = 10; // 호가창 최대 행 수
+const MARKET_CLOSED_TICKS = 3; // 휴장 시간대엔 위아래 3호가만 보여준다
 
 interface OrderBookProps {
   data: OrderbookData;
   loading?: boolean;
+  // UTC 0시~0시5분(자정 직후 5분) 휴장 시간대 여부. true면 호가를 3단만 보여주고 배지를 띄운다.
+  isMarketClosed?: boolean;
 }
 
 // 체결 현황 컴포넌트
@@ -110,7 +118,8 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
   );
 }
 
-export function OrderBook({ data, loading }: OrderBookProps) {
+export function OrderBook({ data, loading, isMarketClosed }: OrderBookProps) {
+  const tickCount = isMarketClosed ? MARKET_CLOSED_TICKS : MAX_TICKS;
   const prevSellRef = useRef<OrderbookItem[]>([]);
   const prevBuyRef = useRef<OrderbookItem[]>([]);
   const [sellDiffs, setSellDiffs] = useState<Map<string, number>>(new Map());
@@ -230,21 +239,25 @@ export function OrderBook({ data, loading }: OrderBookProps) {
   ];
   const maxNumber = Math.max(...allNumbers, 1);
 
-  // 매도는 가격 높은 순으로 정렬 (높은 가격이 위)
-  const sortedSellOrders = [...sellOrders]
-    .sort((a, b) => toNum(b.price) - toNum(a.price))
-    .slice(0, MAX_TICKS);
+  // 매도는 가격 높은 순으로 정렬 (높은 가격이 위, 현재가에 가까울수록 아래)
+  // 휴장 중엔 내용을 3단으로만 줄이되, 현재가에서 먼 호가부터 잘라내야 하므로
+  // 정렬된 배열의 앞쪽(가격이 먼 쪽)이 아니라 뒤쪽(현재가에 가까운 쪽)을 남긴다.
+  const sortedSellOrdersFull = [...sellOrders].sort(
+    (a, b) => toNum(b.price) - toNum(a.price),
+  );
+  const sortedSellOrders = sortedSellOrdersFull.slice(-tickCount);
 
-  // 매수는 가격 높은 순으로 정렬 (높은 가격이 위)
+  // 매수는 가격 높은 순으로 정렬 (높은 가격이 위 = 현재가에 가까움) — 앞쪽을 남기면 된다
   const sortedBuyOrders = [...buyOrders]
     .sort((a, b) => toNum(b.price) - toNum(a.price))
-    .slice(0, MAX_TICKS);
+    .slice(0, tickCount);
 
   // 총 잔량
   const sellTotal = sellOrders.reduce((sum, o) => sum + toNum(o.quantity), 0);
   const buyTotal = buyOrders.reduce((sum, o) => sum + toNum(o.quantity), 0);
 
-  // 빈 틱 채우기
+  // 빈 틱 채우기 — 내용 칸 수와 무관하게 항상 MAX_TICKS만큼 행 자체는 유지해
+  // 휴장 중에도 호가창 뒷배경/행 구조가 사라지지 않게 한다 (내용만 비워짐)
   const emptySellCount = MAX_TICKS - sortedSellOrders.length;
   const emptyBuyCount = MAX_TICKS - sortedBuyOrders.length;
 
@@ -281,7 +294,6 @@ export function OrderBook({ data, loading }: OrderBookProps) {
 
   return (
     <div className="h-full bg-[#181a20] rounded-xl overflow-hidden relative">
-
       {/* 주식 정보 패널 (매도 영역 오른쪽) */}
       <div className="absolute right-0 top-0 w-[38%] h-[48%]">
         <StockInfoPanel stockInfo={data?.stockInfo || null} />

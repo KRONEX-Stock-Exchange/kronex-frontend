@@ -36,7 +36,7 @@ const fmtWon = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const fmtTime = (value?: string) =>
   value ? new Date(value).toLocaleTimeString("ko-KR") : "-";
 
-// 큰 금액을 조/억/만 단위로 줄여 쓴다. (예: 123456789 → "1억 2,345만원")
+// 큰 금액을 조/억/만 단위로 줄여 쓴다. (예: 123456789 → "1억 2,345만 KRW")
 const WON_UNITS = [
   { size: 1000000000000n, label: "조" },
   { size: 100000000n, label: "억" },
@@ -58,7 +58,7 @@ const fmtCompactWon = (value: string) => {
 
   const unitIndex = WON_UNITS.findIndex((u) => amount >= u.size);
   if (unitIndex === -1)
-    return `${negative ? "-" : ""}${amount.toLocaleString("ko-KR")}원`;
+    return `${negative ? "-" : ""}${amount.toLocaleString("ko-KR")} KRW`;
 
   // 최상위 단위와 그 바로 아래 단위까지만 남겨서 한눈에 읽히게 한다
   const unit = WON_UNITS[unitIndex];
@@ -70,8 +70,37 @@ const fmtCompactWon = (value: string) => {
     subValue > 0n
       ? `${head.toLocaleString("ko-KR")}${unit.label} ${subValue.toLocaleString("ko-KR")}${sub!.label}`
       : `${head.toLocaleString("ko-KR")}${unit.label}`;
-  return `${negative ? "-" : ""}${text}원`;
+  return `${negative ? "-" : ""}${text} KRW`;
 };
+
+// 휴장 시간대: UTC 0시 0분 ~ 0시 5분 (자정 포함, 5분 정각에 개장)
+const MARKET_CLOSE_MINUTES = 5;
+
+// 주어진 시각 기준으로 휴장 여부와, 휴장이라면 개장(00:05:00 UTC)까지 남은 초를 계산한다
+function getMarketCloseState(now: Date): {
+  isClosed: boolean;
+  secondsUntilOpen: number;
+} {
+  const utcH = now.getUTCHours();
+  const utcM = now.getUTCMinutes();
+  const isClosed = utcH === 0 && utcM < MARKET_CLOSE_MINUTES;
+  if (!isClosed) return { isClosed: false, secondsUntilOpen: 0 };
+
+  const openAt = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    0,
+    MARKET_CLOSE_MINUTES,
+    0,
+    0,
+  );
+  const secondsUntilOpen = Math.max(
+    0,
+    Math.round((openAt - now.getTime()) / 1000),
+  );
+  return { isClosed: true, secondsUntilOpen };
+}
 
 const PERCENT_SNAP_POINTS = [0, 25, 50, 75, 100];
 const PERCENT_SNAP_THRESHOLD = 4;
@@ -131,9 +160,55 @@ function GroupDivider() {
   return (
     <span
       aria-hidden
-      className="select-none self-center text-sm leading-none text-[#3b3f46]"
+      className="-mx-3 select-none self-center text-sm leading-none text-[#3b3f46]"
     >
       │
+    </span>
+  );
+}
+
+// 최대 너비를 넘는 금액은 가로 스크롤로 잘라 보여주되, 잘린 부분이 있음을
+// 오른쪽 그라데이션 페이드로 알려준다 (끝까지 스크롤하면 페이드가 사라진다).
+function ScrollableAmount({
+  className,
+  children,
+}: {
+  className: string;
+  children: React.ReactNode;
+}) {
+  const scrollRef = useRef<HTMLSpanElement>(null);
+  const [showFade, setShowFade] = useState(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+      setShowFade(el.scrollWidth > el.clientWidth + 1 && !atEnd);
+    };
+    update();
+
+    el.addEventListener("scroll", update);
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  });
+
+  return (
+    <span className="relative block max-w-full">
+      <span
+        ref={scrollRef}
+        className={`block max-w-full overflow-x-auto whitespace-nowrap ${className}`}
+      >
+        {children}
+      </span>
+      {showFade && (
+        <span className="pointer-events-none absolute inset-y-0 right-0 w-3 bg-linear-to-l from-[#181a20] to-transparent" />
+      )}
     </span>
   );
 }
@@ -287,6 +362,13 @@ export function TradingPage() {
     return { totalBuyAmount, totalEvalAmount, totalProfit, totalProfitRate };
   }, [accountData?.holdings]);
 
+  const currentHolding = accountData?.holdings?.find(
+    (h) => h.stock.id === stockId,
+  );
+  const currentAvgPrice = currentHolding
+    ? Number(currentHolding.average)
+    : null;
+
   const [accountTab, setAccountTab] = useState<AccountTab>("계좌");
   const [orderType, setOrderType] = useState<OrderTypeTab>("매수");
   const [priceType, setPriceType] = useState<"지정가" | "시장가">("지정가");
@@ -349,11 +431,13 @@ export function TradingPage() {
 
   // 퍼센트 슬라이더 값에 따른 주문 수량 계산 (슬라이더 조작 시, 종목 전환 시 공용으로 쓴다)
   const computeQuantityForPercent = (pct: number) => {
-    const orderPrice =
-      priceType === "지정가"
-        ? parseInt(price)
-        : parseFloat(data?.stockInfo?.upperLimit ?? "0");
+    // 매도는 가격과 무관하게 보유수량만으로 계산하므로, 가격(상한가 등)은
+    // 매수일 때만 계산한다 — 안 그러면 매도 시장가에서도 상한가를 참조하는 것처럼 보인다.
     if (orderType === "매수") {
+      const orderPrice =
+        priceType === "지정가"
+          ? parseInt(price)
+          : parseFloat(data?.stockInfo?.upperLimit ?? "0");
       const availableBalance = accountData?.account?.availableBalance ?? "0";
       if (orderPrice <= 0) return null;
       return String(
@@ -364,6 +448,13 @@ export function TradingPage() {
     const canSell = parseInt(holding?.availableQuantity ?? "0");
     return String(Math.floor((canSell * pct) / 100));
   };
+
+  // 총 주문 금액: 지정가는 입력한 가격, 시장가는 현재가를 기준으로 한 예상 금액이다.
+  const orderTotalAmount =
+    (priceType === "지정가"
+      ? parseInt(price) || 0
+      : Number(livePrice ?? data?.stockInfo?.price ?? 0)) *
+    (parseInt(quantity) || 0);
 
   // 종목이 바뀌면(가격 초기화가 끝난 뒤) 퍼센트바로 잡아둔 수량도 새 종목 기준으로 다시 계산한다.
   // (퍼센트를 아직 안 건드렸으면 0%라 재계산할 의미가 없으므로 건너뛴다)
@@ -465,7 +556,7 @@ export function TradingPage() {
     if (!quantity || qty < 1)
       return showToast("수량은 1주 이상 입력해주세요.", "error");
     if (priceType === "지정가" && (!price || prc < 1))
-      return showToast("가격은 1원 이상 입력해주세요.", "error");
+      return showToast("가격은 1 KRW 이상 입력해주세요.", "error");
     setOrderLoading(true);
     try {
       const endpoint =
@@ -600,6 +691,16 @@ export function TradingPage() {
     }
   };
 
+  // UTC 0시~0시5분 휴장: 매초 실제 UTC 시각을 확인해 휴장 여부와 개장까지 남은 시간을 계산한다.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+  const { isClosed: isMarketClosed, secondsUntilOpen } =
+    getMarketCloseState(now);
+  const closedCountdownLabel = `${String(Math.floor(secondsUntilOpen / 60)).padStart(2, "0")}:${String(secondsUntilOpen % 60).padStart(2, "0")}`;
+
   return (
     <div className="flex flex-col h-full w-full">
       {/* 종목 선택 바는 거래 화면 전체 폭을 사용한다. */}
@@ -610,6 +711,7 @@ export function TradingPage() {
           selectedStockId={stockId}
           onSelectStock={setStockId}
           contentWidthTarget={chartPanel}
+          isMarketClosed={isMarketClosed}
         />
       </div>
 
@@ -620,7 +722,7 @@ export function TradingPage() {
           className="flex-5 min-w-0 min-h-0 flex flex-col gap-2.5"
         >
           <div className="flex-52 min-h-0">
-            <CandlestickChart stockId={stockId} />
+            <CandlestickChart stockId={stockId} avgPrice={currentAvgPrice} />
           </div>
           <div className="flex-48 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
             <div className="flex items-center gap-4 mb-3 shrink-0">
@@ -643,7 +745,7 @@ export function TradingPage() {
             >
               {accountTab === "계좌" && (
                 <>
-                  <div className="mb-3 flex items-center gap-6 pb-2.5">
+                  <div className="mb-3 flex items-center gap-6 pb-2.5 @container">
                     {!accountData?.account &&
                       accountLoading &&
                       [
@@ -658,7 +760,7 @@ export function TradingPage() {
                           {/* 현금 그룹과 평가 그룹 사이 구분 */}
                           {label === "총매입금액" && <GroupDivider />}
                           <div className="flex min-w-0 flex-col gap-1 mt-1.5">
-                            <span className="text-[10px] leading-none text-zinc-500">
+                            <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
                               {label}
                             </span>
                             <span
@@ -669,51 +771,51 @@ export function TradingPage() {
                       ))}
                     {accountData?.account && (
                       <>
-                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500">
+                        <div className="flex min-w-0 max-w-[clamp(4.5rem,16cqw,13rem)] flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
                             예수금
                           </span>
-                          <span className="inline-block whitespace-nowrap text-xs leading-none text-white font-semibold tabular-nums pt-0.5">
+                          <ScrollableAmount className="text-xs leading-none text-white font-semibold tabular-nums pt-0.5">
                             {fmtWon(accountData.account.balance)} KRW
-                          </span>
+                          </ScrollableAmount>
                         </div>
-                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500">
+                        <div className="flex min-w-0 max-w-[clamp(4.5rem,16cqw,13rem)] flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
                             주문가능금액
                           </span>
-                          <span className="inline-block whitespace-nowrap text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
+                          <ScrollableAmount className="text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
                             {fmtWon(accountData.account.availableBalance)} KRW
-                          </span>
+                          </ScrollableAmount>
                         </div>
                         <GroupDivider />
-                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500">
+                        <div className="flex min-w-0 max-w-[clamp(4.5rem,16cqw,13rem)] flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
                             총매입금액
                           </span>
-                          <span className="inline-block whitespace-nowrap text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
+                          <ScrollableAmount className="text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
                             {holdingsSummary.totalBuyAmount.toLocaleString(
                               "ko-KR",
                             )}{" "}
                             KRW
-                          </span>
+                          </ScrollableAmount>
                         </div>
-                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500">
+                        <div className="flex min-w-0 max-w-[clamp(4.5rem,16cqw,13rem)] flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
                             총평가금액
                           </span>
-                          <span className="inline-block whitespace-nowrap text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
+                          <ScrollableAmount className="text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
                             {holdingsSummary.totalEvalAmount.toLocaleString(
                               "ko-KR",
                             )}{" "}
                             KRW
-                          </span>
+                          </ScrollableAmount>
                         </div>
-                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500">
+                        <div className="flex min-w-0 max-w-[clamp(3.5rem,13cqw,10rem)] flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
                             평가손익
                           </span>
-                          <span
-                            className={`inline-block whitespace-nowrap text-xs leading-none font-semibold tabular-nums pt-0.5 ${
+                          <ScrollableAmount
+                            className={`text-xs leading-none font-semibold tabular-nums pt-0.5 ${
                               holdingsSummary.totalProfit > 0
                                 ? "text-[#f6465d]"
                                 : holdingsSummary.totalProfit < 0
@@ -726,14 +828,14 @@ export function TradingPage() {
                               "ko-KR",
                             )}{" "}
                             KRW
-                          </span>
+                          </ScrollableAmount>
                         </div>
-                        <div className="flex min-w-0 flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500">
+                        <div className="flex min-w-0 max-w-[clamp(2.5rem,8cqw,6rem)] flex-col gap-1 mt-1.5">
+                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
                             총수익률
                           </span>
-                          <span
-                            className={`inline-block whitespace-nowrap text-xs leading-none font-semibold tabular-nums pt-0.5 ${
+                          <ScrollableAmount
+                            className={`text-xs leading-none font-semibold tabular-nums pt-0.5 ${
                               holdingsSummary.totalProfitRate > 0
                                 ? "text-[#f6465d]"
                                 : holdingsSummary.totalProfitRate < 0
@@ -743,7 +845,7 @@ export function TradingPage() {
                           >
                             {holdingsSummary.totalProfitRate > 0 ? "+" : ""}
                             {holdingsSummary.totalProfitRate.toFixed(2)}%
-                          </span>
+                          </ScrollableAmount>
                         </div>
                       </>
                     )}
@@ -759,7 +861,7 @@ export function TradingPage() {
                           );
                           if (account) setSelectedAccount(account);
                         }}
-                        className="bg-transparent text-white text-xs px-3 py-1 rounded-lg border border-[#3b3f46] outline-none w-fit"
+                        className="bg-[#1f232b] text-white text-xs px-3 py-1 rounded-lg outline-none w-fit hover:bg-[#252a33] transition-colors"
                       >
                         {accounts.map((a) => (
                           <option key={a.id} value={a.id}>
@@ -786,7 +888,7 @@ export function TradingPage() {
                         <th className="text-left py-2">종목명</th>
                         <th className="text-right py-2">보유</th>
                         <th className="text-right py-2">가능</th>
-                        <th className="text-right py-2">평균가</th>
+                        <th className="text-right py-2">매입가</th>
                         <th className="text-right py-2">현재가</th>
                         <th className="text-right py-2">매수금액</th>
                         <th className="text-right py-2">수익률</th>
@@ -1168,7 +1270,11 @@ export function TradingPage() {
 
         {/* 중: 호가창 (기존 렌더 폭 유지) */}
         <div className="w-[calc(30%-16px)] shrink-0">
-          <OrderBook data={data} loading={orderbookLoading} />
+          <OrderBook
+            data={data}
+            loading={orderbookLoading}
+            isMarketClosed={isMarketClosed}
+          />
         </div>
 
         {/* 우: 주문 + 등락률 */}
@@ -1255,7 +1361,7 @@ export function TradingPage() {
                           value={price}
                           onChange={setPrice}
                           onStep={stepPrice}
-                          hint={`호가 단위 ${getTickSize(parseInt(price) || 0).toLocaleString("ko-KR")}원`}
+                          hint={`호가 단위 ${getTickSize(parseInt(price) || 0).toLocaleString("ko-KR")} KRW`}
                         />
                       </div>
                     )}
@@ -1335,6 +1441,13 @@ export function TradingPage() {
                         )}
                       </div>
                     </div>
+
+                    <div className="flex items-center justify-between shrink-0 px-1 text-xs">
+                      <span className="text-zinc-500">총 주문 금액</span>
+                      <span className="text-white font-semibold tabular-nums">
+                        {orderTotalAmount.toLocaleString("ko-KR")} KRW
+                      </span>
+                    </div>
                   </>
                 )}
 
@@ -1383,12 +1496,12 @@ export function TradingPage() {
                           value={amendPrice}
                           onChange={setAmendPrice}
                           onStep={stepPrice}
-                          hint={`호가 단위 ${getTickSize(parseInt(amendPrice) || 0).toLocaleString("ko-KR")}원`}
+                          hint={`호가 단위 ${getTickSize(parseInt(amendPrice) || 0).toLocaleString("ko-KR")} KRW`}
                         />
                         {amendInsufficientBalance && (
                           <p className="mt-1.5 text-[11px] text-[#f6465d]">
                             주문 가능 금액이 부족합니다. (추가로 필요한 금액{" "}
-                            {amendExtraCost.toLocaleString("ko-KR")}원)
+                            {amendExtraCost.toLocaleString("ko-KR")} KRW)
                           </p>
                         )}
                       </div>
@@ -1461,37 +1574,71 @@ export function TradingPage() {
                       주문이 없을 시 남은 잔량은 자동으로 취소됩니다.
                     </div>
                   )}
-                  <button
-                    onClick={handleOrder}
-                    disabled={orderLoading}
-                    className={`mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 shrink-0 ${orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"}`}
-                  >
-                    {orderLoading ? "처리중..." : orderType}
-                  </button>
+                  <div className="relative group mt-3 shrink-0">
+                    <button
+                      onClick={handleOrder}
+                      disabled={orderLoading || isMarketClosed}
+                      className={`w-full py-3 rounded-lg text-sm font-bold tabular-nums disabled:opacity-50 disabled:cursor-not-allowed ${orderType === "매수" ? "bg-[#f6465d] text-white" : "bg-[#2563eb] text-white"}`}
+                    >
+                      {orderLoading
+                        ? "처리중..."
+                        : isMarketClosed
+                          ? closedCountdownLabel
+                          : orderType}
+                    </button>
+                    {isMarketClosed && (
+                      <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#2b2f36] px-2.5 py-1.5 text-[11px] text-zinc-200 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                        지금 휴장 중입니다. 재개까지 {closedCountdownLabel}
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
               {orderType === "정정" && selectedOrder && (
-                <button
-                  onClick={handleAmend}
-                  disabled={
-                    amendLoading ||
-                    amendInsufficientBalance ||
-                    parseInt(amendPrice) ===
-                      Math.trunc(Number(selectedOrder.price))
-                  }
-                  className="mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#F59E0B] text-gray-900 shrink-0"
-                >
-                  {amendLoading ? "처리중..." : "정정 확인"}
-                </button>
+                <div className="relative group mt-3 shrink-0">
+                  <button
+                    onClick={handleAmend}
+                    disabled={
+                      amendLoading ||
+                      amendInsufficientBalance ||
+                      isMarketClosed ||
+                      parseInt(amendPrice) ===
+                        Math.trunc(Number(selectedOrder.price))
+                    }
+                    className="w-full py-3 rounded-lg text-sm font-bold tabular-nums disabled:opacity-50 disabled:cursor-not-allowed bg-[#F59E0B] text-gray-900"
+                  >
+                    {amendLoading
+                      ? "처리중..."
+                      : isMarketClosed
+                        ? closedCountdownLabel
+                        : "정정 확인"}
+                  </button>
+                  {isMarketClosed && (
+                    <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#2b2f36] px-2.5 py-1.5 text-[11px] text-zinc-200 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      지금 휴장 중입니다. 재개까지 {closedCountdownLabel}
+                    </div>
+                  )}
+                </div>
               )}
               {orderType === "취소" && selectedOrder && (
-                <button
-                  onClick={handleCancel}
-                  disabled={cancelLoading}
-                  className="mt-3 py-3 rounded-lg text-sm font-bold disabled:opacity-50 bg-[#f6465d] hover:bg-[#e03650] text-white shrink-0"
-                >
-                  {cancelLoading ? "처리중..." : "주문 취소 확인"}
-                </button>
+                <div className="relative group mt-3 shrink-0">
+                  <button
+                    onClick={handleCancel}
+                    disabled={cancelLoading || isMarketClosed}
+                    className="w-full py-3 rounded-lg text-sm font-bold tabular-nums disabled:opacity-50 disabled:cursor-not-allowed bg-[#f6465d] hover:bg-[#e03650] text-white"
+                  >
+                    {cancelLoading
+                      ? "처리중..."
+                      : isMarketClosed
+                        ? closedCountdownLabel
+                        : "주문 취소 확인"}
+                  </button>
+                  {isMarketClosed && (
+                    <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#2b2f36] px-2.5 py-1.5 text-[11px] text-zinc-200 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      지금 휴장 중입니다. 재개까지 {closedCountdownLabel}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1631,7 +1778,7 @@ export function TradingPage() {
                         </td>
                         <td className="text-right py-1.5 tabular-nums">
                           {amountMode === "원본"
-                            ? `${fmtWon(toWonInt(item.totalAssets))}원`
+                            ? `${fmtWon(toWonInt(item.totalAssets))} KRW`
                             : fmtCompactWon(toWonInt(item.totalAssets))}
                         </td>
                       </tr>
