@@ -9,7 +9,7 @@ interface PatchNoteGroup {
 
 const PATCH_NOTES: PatchNoteGroup[] = [
   {
-    version: "v0.6",
+    version: "v0.6.0",
     date: "2026-08-24",
     added: [
       "패치노트 기능 추가",
