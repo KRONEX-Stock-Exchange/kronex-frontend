@@ -15,7 +15,7 @@ export function AuthShell({
   footer,
 }: AuthShellProps) {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#14161b] px-4 py-12">
+    <div className="relative min-h-dvh overflow-hidden bg-[#14161b] px-4 py-8 lg:py-12">
       {/* 상단 은은한 브랜드 글로우 — 단조로운 검은 배경에 깊이를 준다 */}
       <div
         aria-hidden
@@ -26,7 +26,7 @@ export function AuthShell({
         }}
       />
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-6rem)] w-full max-w-100 flex-col justify-center">
+      <div className="relative mx-auto flex min-h-[calc(100dvh-4rem)] lg:min-h-[calc(100dvh-6rem)] w-full max-w-100 flex-col justify-center">
         <div className="mb-8 text-center">
           <p className="mb-5 font-['Archivo_Black'] text-3xl tracking-tight">
             <span className="text-[#F59E0B]">K</span>
@@ -38,7 +38,7 @@ export function AuthShell({
 
         {/* 무거운 드롭섀도 대신, 위쪽 얇은 하이라이트 + 넓고 옅은 앰비언트 그림자로 띄운다 */}
         <div
-          className="rounded-xl border border-[#2b2f36] bg-[#181a20] p-6"
+          className="rounded-xl border border-[#2b2f36] bg-[#181a20] p-5 lg:p-6"
           style={{
             boxShadow:
               "inset 0 1px 0 0 rgba(255,255,255,0.04), 0 24px 56px -28px rgba(0,0,0,0.85)",

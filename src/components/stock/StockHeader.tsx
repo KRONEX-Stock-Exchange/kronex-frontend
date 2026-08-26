@@ -22,6 +22,24 @@ interface StockHeaderProps {
 type Category = "전체" | "관심" | "상승" | "하락";
 type SortKey = "name" | "price" | "changeRate";
 
+// lg(1024px) 이상을 데스크톱으로 취급. contentWidthTarget 강제 폭 적용 여부를 결정하는 데 쓴다.
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(min-width: 1024px)").matches
+      : true,
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+
+  return isDesktop;
+}
+
 function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
   return (
     <svg className="w-2.5 h-2.5 shrink-0" viewBox="0 0 10 12" fill="none">
@@ -47,6 +65,7 @@ export function StockHeader({
   contentWidthTarget,
   isMarketClosed,
 }: StockHeaderProps) {
+  const isDesktop = useIsDesktop();
   const [open, setOpen] = useState(false);
   const [contentWidth, setContentWidth] = useState<number | null>(null);
   const [query, setQuery] = useState("");
@@ -160,8 +179,8 @@ export function StockHeader({
         </span>
       )}
       <div
-        className="relative"
-        style={contentWidth ? { width: contentWidth } : undefined}
+        className="relative w-full"
+        style={isDesktop && contentWidth ? { width: contentWidth } : undefined}
       >
         {/* 트리거 버튼 */}
         <button
@@ -173,15 +192,15 @@ export function StockHeader({
               <div className="w-8 h-8 rounded-lg bg-[#1f232b] flex items-center justify-center text-xs font-bold text-white shrink-0">
                 {stockInfo.name.charAt(0)}
               </div>
-              <div className="flex flex-col items-start leading-tight">
-                <span className="text-white font-semibold text-sm">
+              <div className="flex flex-col items-start leading-tight min-w-0">
+                <span className="text-white font-semibold text-sm truncate max-w-full">
                   {stockInfo.name}
                 </span>
-                <span className="text-zinc-500 text-[11px]">
+                <span className="text-zinc-500 text-[11px] hidden sm:block">
                   #{stockInfo.id}
                 </span>
               </div>
-              <div className="flex items-baseline gap-2 ml-2">
+              <div className="flex items-baseline gap-2 ml-2 shrink-0">
                 <span className={`text-xl font-bold ${priceColor}`}>
                   {price.toLocaleString("ko-KR")}
                 </span>
@@ -255,12 +274,12 @@ export function StockHeader({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="종목 검색"
-                  className="bg-transparent text-white text-sm placeholder-zinc-500 outline-none w-full"
+                  className="bg-transparent text-white text-base lg:text-sm placeholder-zinc-500 outline-none w-full"
                 />
                 {query && (
                   <button
                     onClick={() => setQuery("")}
-                    className="text-zinc-600 hover:text-white shrink-0 transition-colors"
+                    className="text-zinc-600 hover:text-white shrink-0 transition-colors p-2 -m-2"
                   >
                     <svg
                       className="w-3.5 h-3.5"
@@ -282,7 +301,7 @@ export function StockHeader({
                 <button
                   key={cat}
                   onClick={() => setCategory(cat)}
-                  className={`px-3 py-1 text-[11px] rounded-lg transition-colors ${
+                  className={`px-3 py-2.5 lg:py-1 text-[11px] rounded-lg transition-colors ${
                     category === cat
                       ? "bg-[#1f232b] text-white font-semibold"
                       : "text-zinc-500 hover:text-zinc-300"
@@ -300,21 +319,21 @@ export function StockHeader({
             <div className="grid grid-cols-[1fr_auto_auto] items-center pl-3 pr-4 py-1.5 text-[11px] text-zinc-600">
               <button
                 onClick={() => toggleSort("name")}
-                className="flex items-center gap-1 hover:text-zinc-300 transition-colors justify-self-start pl-9"
+                className="flex items-center gap-1 py-1.5 lg:py-0 hover:text-zinc-300 transition-colors justify-self-start pl-9"
               >
                 종목
                 <SortIcon active={sortKey === "name"} asc={sortAsc} />
               </button>
               <button
                 onClick={() => toggleSort("price")}
-                className="flex items-center justify-end gap-1 w-24 hover:text-zinc-300 transition-colors"
+                className="flex items-center justify-end gap-1 w-24 py-1.5 lg:py-0 hover:text-zinc-300 transition-colors"
               >
                 현재가
                 <SortIcon active={sortKey === "price"} asc={sortAsc} />
               </button>
               <button
                 onClick={() => toggleSort("changeRate")}
-                className="flex items-center justify-end gap-1 w-16 hover:text-zinc-300 transition-colors"
+                className="flex items-center justify-end gap-1 w-16 py-1.5 lg:py-0 hover:text-zinc-300 transition-colors"
               >
                 등락률
                 <SortIcon active={sortKey === "changeRate"} asc={sortAsc} />
@@ -322,7 +341,7 @@ export function StockHeader({
             </div>
 
             {/* 리스트 */}
-            <div className="max-h-108 overflow-y-auto">
+            <div className="max-h-[60vh] lg:max-h-108 overflow-y-auto overscroll-contain">
               {filtered.length > 0 ? (
                 filtered.map((stock) => {
                   const per = stock.changeRate;
@@ -345,7 +364,7 @@ export function StockHeader({
                     >
                       <button
                         onClick={() => toggleFavorite(stock.id)}
-                        className={`shrink-0 p-1 transition-colors ${
+                        className={`shrink-0 p-3 -m-3 transition-colors ${
                           isFav
                             ? "text-[#F59E0B]"
                             : "text-zinc-700 hover:text-zinc-500"

@@ -1,5 +1,10 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { Toast, type ToastData } from "../components/common/Toast";
+import {
+  useTransferHistory,
+  type TransferDirectionFilter,
+  type TransferStatus,
+} from "../hooks/useTransferHistory";
 import { OrderBook } from "../components/orderbook/orderbook";
 import { StockHeader } from "../components/stock/StockHeader";
 import { CandlestickChart } from "../components/chart/CandlestickChart";
@@ -24,17 +29,38 @@ interface RankingItem {
 
 const RANKING_TOP_N = 10;
 
-// 송금 API가 아직 없어서 지금은 항상 빈 배열이지만, 연동되면 그대로 채워 쓸 수 있게 미리 형태만 잡아둔다
-interface TransferHistoryItem {
-  id: string;
-  toAccountNumber: number;
-  amount: string;
-  createdAt: string;
-}
-
 const fmtWon = (s: string) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const fmtTime = (value?: string) =>
   value ? new Date(value).toLocaleTimeString("ko-KR") : "-";
+
+// 송금 내역은 여러 날에 걸쳐 페이지를 넘기므로 날짜까지 보여준다
+const fmtTransferTime = (value: string) => {
+  const d = new Date(value);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// COMPLETED는 정상 흐름이라 배지를 달지 않는다
+const TRANSFER_STATUS_LABEL: Partial<Record<TransferStatus, string>> = {
+  RECEIVED: "처리중",
+  REJECTED: "거부됨",
+};
+
+const TRANSFER_REJECT_LABEL: Record<string, string> = {
+  INSUFFICIENT_BALANCE: "잔액 부족",
+  INVALID_RECIPIENT: "받는 계좌 없음",
+  INVALID_SENDER: "보내는 계좌 없음",
+  SENDER_NOT_ACTIVE: "보내는 계좌 비활성",
+  RECIPIENT_NOT_ACTIVE: "받는 계좌 비활성",
+  SELF_TRANSFER: "본인 계좌 송금",
+  INVALID_REQUEST: "잘못된 요청",
+};
+
+const TRANSFER_FILTERS: { key: TransferDirectionFilter; label: string }[] = [
+  { key: "ALL", label: "전체" },
+  { key: "SENT", label: "보냄" },
+  { key: "RECEIVED", label: "받음" },
+];
 
 // 큰 금액을 조/억/만 단위로 줄여 쓴다. (예: 123456789 → "1억 2,345만 KRW")
 const WON_UNITS = [
@@ -114,6 +140,10 @@ type OrderTypeTab = "매수" | "매도" | "정정" | "취소";
 type AccountTab = "계좌" | "체결" | "미체결" | "송금";
 type MarketTab = "실시간 등락률" | "랭킹";
 type AmountMode = "원본" | "간략";
+// 모바일 하단 탭바 — lg 미만에서 차트/계좌/호가/주문/시세 패널 중 하나만 보여줄 때 쓴다.
+// (데스크톱에서는 다섯 패널이 모두 항상 보이므로 이 상태는 lg 미만에서만 의미가 있다)
+type MobileTab = "차트" | "호가" | "주문" | "계좌" | "시세";
+const MOBILE_TABS: MobileTab[] = ["차트", "호가", "주문", "계좌", "시세"];
 
 // 직전 스냅샷과 비교해 각 항목이 몇 계단 오르내렸는지 계산한다.
 // prevRanksRef가 null이면(첫 조회) 비교 기준이 없으므로 빈 Map을 돌려주고 기준만 세운다.
@@ -163,52 +193,6 @@ function GroupDivider() {
       className="-mx-3 select-none self-center text-sm leading-none text-[#3b3f46]"
     >
       │
-    </span>
-  );
-}
-
-// 최대 너비를 넘는 금액은 가로 스크롤로 잘라 보여주되, 잘린 부분이 있음을
-// 오른쪽 그라데이션 페이드로 알려준다 (끝까지 스크롤하면 페이드가 사라진다).
-function ScrollableAmount({
-  className,
-  children,
-}: {
-  className: string;
-  children: React.ReactNode;
-}) {
-  const scrollRef = useRef<HTMLSpanElement>(null);
-  const [showFade, setShowFade] = useState(false);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-
-    const update = () => {
-      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
-      setShowFade(el.scrollWidth > el.clientWidth + 1 && !atEnd);
-    };
-    update();
-
-    el.addEventListener("scroll", update);
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => {
-      el.removeEventListener("scroll", update);
-      ro.disconnect();
-    };
-  });
-
-  return (
-    <span className="relative block max-w-full">
-      <span
-        ref={scrollRef}
-        className={`block max-w-full overflow-x-auto whitespace-nowrap ${className}`}
-      >
-        {children}
-      </span>
-      {showFade && (
-        <span className="pointer-events-none absolute inset-y-0 right-0 w-3 bg-linear-to-l from-[#181a20] to-transparent" />
-      )}
     </span>
   );
 }
@@ -284,7 +268,7 @@ function StepperInput({
               step(-1);
             }
           }}
-          className="w-full min-w-0 bg-transparent text-white text-xs px-3 py-2 outline-none"
+          className="w-full min-w-0 bg-transparent text-white text-base lg:text-xs px-3 py-2 outline-none"
         />
         <div className="flex flex-col shrink-0 pr-2 -space-y-0.5">
           <button
@@ -331,8 +315,104 @@ function StepperInput({
   );
 }
 
+// 모바일 하단 탭바 아이콘. Header.tsx의 MenuIcon과 같은 시각 언어(24 viewBox, currentColor stroke,
+// strokeWidth 2, round cap/join)를 쓰되 하단 탭바에 맞게 20px로 그린다.
+function TabIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      {children}
+    </svg>
+  );
+}
+
+// 차트: 캔들스틱 3개 (몸통 + 위아래 꼬리)
+function ChartTabIcon() {
+  return (
+    <TabIcon>
+      <line x1="6" y1="3" x2="6" y2="8" />
+      <rect x="4" y="8" width="4" height="7" rx="1" />
+      <line x1="6" y1="15" x2="6" y2="20" />
+      <line x1="12" y1="2" x2="12" y2="6" />
+      <rect x="10" y="6" width="4" height="10" rx="1" />
+      <line x1="12" y1="16" x2="12" y2="21" />
+      <line x1="18" y1="6" x2="18" y2="9" />
+      <rect x="16" y="9" width="4" height="6" rx="1" />
+      <line x1="18" y1="15" x2="18" y2="18" />
+    </TabIcon>
+  );
+}
+
+// 호가: 길이가 다른 가로 막대 4줄 — 호가창의 매수/매도 잔량 사다리를 단순화한 모양
+function OrderBookTabIcon() {
+  return (
+    <TabIcon>
+      <line x1="3" y1="5" x2="21" y2="5" />
+      <line x1="3" y1="10" x2="15" y2="10" />
+      <line x1="3" y1="15" x2="19" y2="15" />
+      <line x1="3" y1="20" x2="11" y2="20" />
+    </TabIcon>
+  );
+}
+
+// 주문: 매수(위쪽 화살표)와 매도(아래쪽 화살표)를 나란히
+function OrderTabIcon() {
+  return (
+    <TabIcon>
+      <line x1="7" y1="20" x2="7" y2="4" />
+      <polyline points="4 8 7 4 10 8" />
+      <line x1="17" y1="4" x2="17" y2="20" />
+      <polyline points="14 16 17 20 20 16" />
+    </TabIcon>
+  );
+}
+
+// 계좌: 카드/지갑 (테두리 + 상단 슬롯 라인)
+function AccountTabIcon() {
+  return (
+    <TabIcon>
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <line x1="2" y1="10" x2="22" y2="10" />
+    </TabIcon>
+  );
+}
+
+// 시세: 트로피 — 실시간 등락률/랭킹을 의미상 대표하면서, 다른 네 아이콘과 실루엣이 겹치지 않는다.
+// (별은 StockHeader.tsx의 관심종목 토글이 이미 쓰고 있어 "즐겨찾기"로 읽히므로 피했다)
+function MarketTabIcon() {
+  return (
+    <TabIcon>
+      <path d="M7 4h10" />
+      <path d="M7 4v3a5 5 0 0 0 10 0V4" />
+      <path d="M7 5H5a2 2 0 0 0-2 2v1a3 3 0 0 0 3 3h1" />
+      <path d="M17 5h2a2 2 0 0 1 2 2v1a3 3 0 0 1-3 3h-1" />
+      <line x1="12" y1="12" x2="12" y2="16" />
+      <path d="M9 21h6l-1-4h-4l-1 4z" />
+    </TabIcon>
+  );
+}
+
+const MOBILE_TAB_ICONS: Record<MobileTab, () => React.JSX.Element> = {
+  차트: ChartTabIcon,
+  호가: OrderBookTabIcon,
+  주문: OrderTabIcon,
+  계좌: AccountTabIcon,
+  시세: MarketTabIcon,
+};
+
 export function TradingPage() {
   const [chartPanel, setChartPanel] = useState<HTMLDivElement | null>(null);
+  // 모바일 하단 탭바에서 선택된 패널. lg 이상에서는 쓰이지 않는다(다섯 패널 모두 표시).
+  const [mobileTab, setMobileTab] = useState<MobileTab>("차트");
   const [stockId, setStockId] = useState<number | null>(null);
   const { data, loading: orderbookLoading } = useOrderbook(stockId);
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
@@ -394,9 +474,24 @@ export function TradingPage() {
 
   const [transferTarget, setTransferTarget] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
+  const [transferAlias, setTransferAlias] = useState("");
   const [transferLoading, setTransferLoading] = useState(false);
-  // TODO: 송금 내역 API가 생기면 계좌 전환 시 조회해서 채운다
-  const [transferHistory] = useState<TransferHistoryItem[]>([]);
+  const {
+    items: transferHistory,
+    page: transferPage,
+    totalPages: transferTotalPages,
+    total: transferTotal,
+    loading: transferHistoryLoading,
+    direction: transferDirection,
+    setDirection: setTransferDirection,
+    sort: transferSort,
+    setSort: setTransferSort,
+    goToPage: goToTransferPage,
+    refresh: refreshTransferHistory,
+  } = useTransferHistory(
+    selectedAccount?.accountNumber ?? null,
+    accountTab === "송금",
+  );
 
   const [marketTab, setMarketTab] = useState<MarketTab>("실시간 등락률");
   const [amountMode, setAmountMode] = useState<AmountMode>("원본");
@@ -640,15 +735,23 @@ export function TradingPage() {
       return showToast("주문 가능 금액이 부족합니다.", "error");
     setTransferLoading(true);
     try {
-      const response = await apiClient.post("/accounts/transfer", {
-        fromAccountNumber: selectedAccount?.accountNumber,
-        toAccountNumber: Number(transferTarget),
-        amount,
-      });
+      const response = await apiClient.post(
+        `/accounts/${selectedAccount?.accountNumber}/transfers`,
+        {
+          recipientAccountNumber: Number(transferTarget),
+          amount,
+          ...(transferAlias.trim()
+            ? { senderAlias: transferAlias.trim() }
+            : {}),
+        },
+      );
       if (response.success) {
-        showToast("송금이 완료되었습니다.", "success");
+        // 접수 단계라 잔액 반영·최종 상태는 엔진 처리 후에 확정된다
+        showToast("송금이 접수되었습니다.", "success");
         setTransferTarget("");
         setTransferAmount("");
+        setTransferAlias("");
+        refreshTransferHistory();
       } else {
         showToast(getErrorMsg(response.error, "송금에 실패했습니다."), "error");
       }
@@ -704,7 +807,7 @@ export function TradingPage() {
   return (
     <div className="flex flex-col h-full w-full">
       {/* 종목 선택 바는 거래 화면 전체 폭을 사용한다. */}
-      <div className="shrink-0 px-5 pt-2.5">
+      <div className="shrink-0 px-3 lg:px-5 pt-2.5">
         <StockHeader
           stockInfo={data?.stockInfo ?? null}
           stocks={stocks}
@@ -715,16 +818,28 @@ export function TradingPage() {
         />
       </div>
 
-      <div className="flex flex-1 min-h-0 gap-2.5 px-5 pt-2.5 pb-2.5">
-        {/* 좌: 차트 + 계좌 */}
+      {/*
+        모바일(lg 미만)에서는 다섯 패널(차트/호가/주문/계좌/시세)을 모두 마운트한 채
+        absolute inset-x-3 inset-y-2.5로 이 컨테이너 위에 거터를 두고 겹쳐두고, 선택된 탭만 visible로 보여준다.
+        display:none 대신 visibility를 쓰는 이유는 CandlestickChart가 컨테이너 크기 변화를
+        window resize 이벤트로만 감지하기 때문 — display:none이면 크기가 0이 되어 탭 전환 시
+        차트가 깨질 수 있다. absolute + visibility는 항상 실제 크기를 유지해 이 문제를 피한다.
+        lg 이상에서는 static/relative flex 배치로 되돌아가 데스크톱 3열 레이아웃을 그대로 유지한다.
+      */}
+      <div className="relative flex flex-1 min-h-0 gap-2.5 lg:px-5 lg:pt-2.5 lg:pb-2.5">
+        {/* 좌: 차트 + 계좌 (모바일에서는 서로 다른 탭이라 wrapper를 contents로 지워 형제로 만든다) */}
         <div
           ref={setChartPanel}
-          className="flex-5 min-w-0 min-h-0 flex flex-col gap-2.5"
+          className="contents lg:flex lg:flex-5 lg:min-w-0 lg:min-h-0 lg:flex-col lg:gap-2.5"
         >
-          <div className="flex-52 min-h-0">
+          <div
+            className={`absolute inset-x-3 inset-y-2.5 lg:static lg:flex-52 lg:min-h-0 ${mobileTab === "차트" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
+          >
             <CandlestickChart stockId={stockId} avgPrice={currentAvgPrice} />
           </div>
-          <div className="flex-48 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
+          <div
+            className={`absolute inset-x-3 inset-y-2.5 lg:static lg:flex-48 lg:min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col ${mobileTab === "계좌" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
+          >
             <div className="flex items-center gap-4 mb-3 shrink-0">
               {(["계좌", "체결", "미체결", "송금"] as AccountTab[]).map(
                 (tab) => (
@@ -739,242 +854,239 @@ export function TradingPage() {
               )}
             </div>
 
+            {accountTab === "계좌" && (
+              <div className="mb-3 flex items-center gap-6 overflow-x-auto pb-2.5 shrink-0 cursor-text">
+                {!accountData?.account &&
+                  accountLoading &&
+                  [
+                    ["예수금", "w-24"],
+                    ["주문가능금액", "w-24"],
+                    ["총매입금액", "w-24"],
+                    ["총평가금액", "w-24"],
+                    ["평가손익", "w-20"],
+                    ["총수익률", "w-12"],
+                  ].map(([label, width]) => (
+                    <Fragment key={label}>
+                      {/* 현금 그룹과 평가 그룹 사이 구분 */}
+                      {label === "총매입금액" && <GroupDivider />}
+                      <div className="flex min-w-0 flex-col gap-1 mt-1.5">
+                        <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
+                          {label}
+                        </span>
+                        <span
+                          className={`mt-0.5 h-3 ${width} animate-pulse rounded bg-[#2b2f36]`}
+                        />
+                      </div>
+                    </Fragment>
+                  ))}
+                {accountData?.account && (
+                  <>
+                    <div className="flex shrink-0 flex-col gap-1 mt-1.5">
+                      <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
+                        예수금
+                      </span>
+                      <span className="text-sm lg:text-xs leading-none text-white font-semibold tabular-nums pt-0.5 whitespace-nowrap">
+                        {fmtWon(accountData.account.balance)} KRW
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 flex-col gap-1 mt-1.5">
+                      <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
+                        주문가능금액
+                      </span>
+                      <span className="text-sm lg:text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5 whitespace-nowrap">
+                        {fmtWon(accountData.account.availableBalance)} KRW
+                      </span>
+                    </div>
+                    <GroupDivider />
+                    <div className="flex shrink-0 flex-col gap-1 mt-1.5">
+                      <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
+                        총매입금액
+                      </span>
+                      <span className="text-sm lg:text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5 whitespace-nowrap">
+                        {holdingsSummary.totalBuyAmount.toLocaleString("ko-KR")}{" "}
+                        KRW
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 flex-col gap-1 mt-1.5">
+                      <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
+                        총평가금액
+                      </span>
+                      <span className="text-sm lg:text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5 whitespace-nowrap">
+                        {holdingsSummary.totalEvalAmount.toLocaleString(
+                          "ko-KR",
+                        )}{" "}
+                        KRW
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 flex-col gap-1 mt-1.5">
+                      <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
+                        평가손익
+                      </span>
+                      <span
+                        className={`text-sm lg:text-xs leading-none font-semibold tabular-nums pt-0.5 whitespace-nowrap ${
+                          holdingsSummary.totalProfit > 0
+                            ? "text-[#f6465d]"
+                            : holdingsSummary.totalProfit < 0
+                              ? "text-[#2563eb]"
+                              : "text-zinc-200"
+                        }`}
+                      >
+                        {holdingsSummary.totalProfit > 0 ? "+" : ""}
+                        {holdingsSummary.totalProfit.toLocaleString(
+                          "ko-KR",
+                        )}{" "}
+                        KRW
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 flex-col gap-1 mt-1.5">
+                      <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
+                        총수익률
+                      </span>
+                      <span
+                        className={`text-sm lg:text-xs leading-none font-semibold tabular-nums pt-0.5 whitespace-nowrap ${
+                          holdingsSummary.totalProfitRate > 0
+                            ? "text-[#f6465d]"
+                            : holdingsSummary.totalProfitRate < 0
+                              ? "text-[#2563eb]"
+                              : "text-zinc-200"
+                        }`}
+                      >
+                        {holdingsSummary.totalProfitRate > 0 ? "+" : ""}
+                        {holdingsSummary.totalProfitRate.toFixed(2)}%
+                      </span>
+                    </div>
+                  </>
+                )}
+                <div className="ml-auto flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-[10px] text-zinc-500">현재 계좌</span>
+                  <select
+                    value={selectedAccount?.id ?? ""}
+                    onChange={(e) => {
+                      const account = accounts.find(
+                        (a) => a.id === Number(e.target.value),
+                      );
+                      if (account) setSelectedAccount(account);
+                    }}
+                    className="bg-[#1f232b] text-white text-base lg:text-xs px-3 py-1 rounded-lg outline-none w-fit hover:bg-[#252a33] transition-colors"
+                  >
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.accountNumber}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
             <div
               className="flex-1 min-h-0 overflow-auto scrollbar-thin"
               onScroll={handleAccountPanelScroll}
             >
               {accountTab === "계좌" && (
-                <>
-                  <div className="mb-3 flex items-center gap-6 pb-2.5 @container">
-                    {!accountData?.account &&
-                      accountLoading &&
-                      [
-                        ["예수금", "w-24"],
-                        ["주문가능금액", "w-24"],
-                        ["총매입금액", "w-24"],
-                        ["총평가금액", "w-24"],
-                        ["평가손익", "w-20"],
-                        ["총수익률", "w-12"],
-                      ].map(([label, width]) => (
-                        <Fragment key={label}>
-                          {/* 현금 그룹과 평가 그룹 사이 구분 */}
-                          {label === "총매입금액" && <GroupDivider />}
-                          <div className="flex min-w-0 flex-col gap-1 mt-1.5">
-                            <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
-                              {label}
-                            </span>
-                            <span
-                              className={`mt-0.5 h-3 ${width} animate-pulse rounded bg-[#2b2f36]`}
-                            />
-                          </div>
-                        </Fragment>
-                      ))}
-                    {accountData?.account && (
-                      <>
-                        <div className="flex min-w-0 max-w-[clamp(4.5rem,16cqw,13rem)] flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
-                            예수금
-                          </span>
-                          <ScrollableAmount className="text-xs leading-none text-white font-semibold tabular-nums pt-0.5">
-                            {fmtWon(accountData.account.balance)} KRW
-                          </ScrollableAmount>
-                        </div>
-                        <div className="flex min-w-0 max-w-[clamp(4.5rem,16cqw,13rem)] flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
-                            주문가능금액
-                          </span>
-                          <ScrollableAmount className="text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
-                            {fmtWon(accountData.account.availableBalance)} KRW
-                          </ScrollableAmount>
-                        </div>
-                        <GroupDivider />
-                        <div className="flex min-w-0 max-w-[clamp(4.5rem,16cqw,13rem)] flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
-                            총매입금액
-                          </span>
-                          <ScrollableAmount className="text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
-                            {holdingsSummary.totalBuyAmount.toLocaleString(
+                <table className="w-full min-w-126.25 table-fixed text-sm lg:text-xs">
+                  {/* 각 컬럼 실측 내용 폭을 기준으로 남는 공간을 8개 컬럼에 균등 배분한 비율 */}
+                  <colgroup>
+                    <col className="w-[16.7%]" />
+                    <col className="w-[8.95%]" />
+                    <col className="w-[8.95%]" />
+                    <col className="w-[12.65%]" />
+                    <col className="w-[12.65%]" />
+                    <col className="w-[14.75%]" />
+                    <col className="w-[11.6%]" />
+                    <col className="w-[13.75%]" />
+                  </colgroup>
+                  <thead className="text-zinc-500 border-b border-[#2b2f36]">
+                    <tr>
+                      <th className="text-left py-2">종목명</th>
+                      <th className="text-right py-2">보유</th>
+                      <th className="text-right py-2">가능</th>
+                      <th className="text-right py-2">매입가</th>
+                      <th className="text-right py-2">현재가</th>
+                      <th className="text-right py-2">매수금액</th>
+                      <th className="text-right py-2">수익률</th>
+                      <th className="text-right py-2">수익금액</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-white">
+                    {accountData?.holdings.map((stock) => {
+                      const cur = Number(stock.stock.price);
+                      const avg = Number(stock.average);
+                      const qty = Number(stock.quantity);
+                      const rate = avg > 0 ? ((cur - avg) / avg) * 100 : 0;
+                      const amount = (cur - avg) * qty;
+                      const color =
+                        rate > 0
+                          ? "text-[#f6465d]"
+                          : rate < 0
+                            ? "text-[#2563eb]"
+                            : "text-white";
+                      return (
+                        <tr
+                          key={stock.stock.id}
+                          onClick={() => {
+                            if (stock.stock.id !== stockId)
+                              setStockId(stock.stock.id);
+                          }}
+                          className={`border-b border-[#2b2f36] cursor-pointer hover:bg-[#2b2f36] transition-colors ${stock.stock.id === stockId ? "bg-[#1f232b]" : ""}`}
+                        >
+                          <td className="py-2 pr-2 truncate">
+                            {stock.stock.name}
+                          </td>
+                          <td className="text-right py-2 tabular-nums">
+                            {qty.toLocaleString("ko-KR")}
+                          </td>
+                          <td className="text-right py-2 tabular-nums">
+                            {Number(stock.availableQuantity).toLocaleString(
                               "ko-KR",
-                            )}{" "}
-                            KRW
-                          </ScrollableAmount>
-                        </div>
-                        <div className="flex min-w-0 max-w-[clamp(4.5rem,16cqw,13rem)] flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
-                            총평가금액
-                          </span>
-                          <ScrollableAmount className="text-xs leading-none text-zinc-200 font-semibold tabular-nums pt-0.5">
-                            {holdingsSummary.totalEvalAmount.toLocaleString(
+                            )}
+                          </td>
+                          <td className="text-right py-2 tabular-nums">
+                            {avg.toLocaleString("ko-KR")}
+                          </td>
+                          <td className="text-right py-2 tabular-nums">
+                            {cur.toLocaleString("ko-KR")}
+                          </td>
+                          <td className="text-right py-2 tabular-nums">
+                            {Number(stock.totalBuyAmount).toLocaleString(
                               "ko-KR",
-                            )}{" "}
-                            KRW
-                          </ScrollableAmount>
-                        </div>
-                        <div className="flex min-w-0 max-w-[clamp(3.5rem,13cqw,10rem)] flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
-                            평가손익
-                          </span>
-                          <ScrollableAmount
-                            className={`text-xs leading-none font-semibold tabular-nums pt-0.5 ${
-                              holdingsSummary.totalProfit > 0
-                                ? "text-[#f6465d]"
-                                : holdingsSummary.totalProfit < 0
-                                  ? "text-[#2563eb]"
-                                  : "text-zinc-200"
-                            }`}
+                            )}
+                          </td>
+                          <td
+                            className={`text-right py-2 tabular-nums ${color}`}
                           >
-                            {holdingsSummary.totalProfit > 0 ? "+" : ""}
-                            {holdingsSummary.totalProfit.toLocaleString(
-                              "ko-KR",
-                            )}{" "}
-                            KRW
-                          </ScrollableAmount>
-                        </div>
-                        <div className="flex min-w-0 max-w-[clamp(2.5rem,8cqw,6rem)] flex-col gap-1 mt-1.5">
-                          <span className="text-[10px] leading-none text-zinc-500 whitespace-nowrap">
-                            총수익률
-                          </span>
-                          <ScrollableAmount
-                            className={`text-xs leading-none font-semibold tabular-nums pt-0.5 ${
-                              holdingsSummary.totalProfitRate > 0
-                                ? "text-[#f6465d]"
-                                : holdingsSummary.totalProfitRate < 0
-                                  ? "text-[#2563eb]"
-                                  : "text-zinc-200"
-                            }`}
+                            {rate > 0 ? "+" : ""}
+                            {rate.toFixed(2)}%
+                          </td>
+                          <td
+                            className={`text-right py-2 tabular-nums ${color}`}
                           >
-                            {holdingsSummary.totalProfitRate > 0 ? "+" : ""}
-                            {holdingsSummary.totalProfitRate.toFixed(2)}%
-                          </ScrollableAmount>
-                        </div>
-                      </>
+                            {amount > 0 ? "+" : ""}
+                            {amount.toLocaleString("ko-KR")}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {accountLoading && !accountData && (
+                      <TableSkeleton columns={8} rows={3} />
                     )}
-                    <div className="ml-auto flex flex-col items-end gap-1 shrink-0">
-                      <span className="text-[10px] text-zinc-500">
-                        현재 계좌
-                      </span>
-                      <select
-                        value={selectedAccount?.id ?? ""}
-                        onChange={(e) => {
-                          const account = accounts.find(
-                            (a) => a.id === Number(e.target.value),
-                          );
-                          if (account) setSelectedAccount(account);
-                        }}
-                        className="bg-[#1f232b] text-white text-xs px-3 py-1 rounded-lg outline-none w-fit hover:bg-[#252a33] transition-colors"
-                      >
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.accountNumber}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <table className="w-full min-w-126.25 table-fixed text-xs">
-                    {/* 각 컬럼 실측 내용 폭을 기준으로 남는 공간을 8개 컬럼에 균등 배분한 비율 */}
-                    <colgroup>
-                      <col className="w-[16.7%]" />
-                      <col className="w-[8.95%]" />
-                      <col className="w-[8.95%]" />
-                      <col className="w-[12.65%]" />
-                      <col className="w-[12.65%]" />
-                      <col className="w-[14.75%]" />
-                      <col className="w-[11.6%]" />
-                      <col className="w-[13.75%]" />
-                    </colgroup>
-                    <thead className="text-zinc-500 border-b border-[#2b2f36]">
-                      <tr>
-                        <th className="text-left py-2">종목명</th>
-                        <th className="text-right py-2">보유</th>
-                        <th className="text-right py-2">가능</th>
-                        <th className="text-right py-2">매입가</th>
-                        <th className="text-right py-2">현재가</th>
-                        <th className="text-right py-2">매수금액</th>
-                        <th className="text-right py-2">수익률</th>
-                        <th className="text-right py-2">수익금액</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-white">
-                      {accountData?.holdings.map((stock) => {
-                        const cur = Number(stock.stock.price);
-                        const avg = Number(stock.average);
-                        const qty = Number(stock.quantity);
-                        const rate = avg > 0 ? ((cur - avg) / avg) * 100 : 0;
-                        const amount = (cur - avg) * qty;
-                        const color =
-                          rate > 0
-                            ? "text-[#f6465d]"
-                            : rate < 0
-                              ? "text-[#2563eb]"
-                              : "text-white";
-                        return (
-                          <tr
-                            key={stock.stock.id}
-                            onClick={() => {
-                              if (stock.stock.id !== stockId)
-                                setStockId(stock.stock.id);
-                            }}
-                            className={`border-b border-[#2b2f36] cursor-pointer hover:bg-[#2b2f36] transition-colors ${stock.stock.id === stockId ? "bg-[#1f232b]" : ""}`}
+                    {!accountLoading &&
+                      (!accountData || accountData.holdings.length === 0) && (
+                        <tr>
+                          <td
+                            colSpan={8}
+                            className="pt-12 pb-4 text-center text-zinc-500"
                           >
-                            <td className="py-2 pr-2 truncate">
-                              {stock.stock.name}
-                            </td>
-                            <td className="text-right py-2 tabular-nums">
-                              {qty.toLocaleString("ko-KR")}
-                            </td>
-                            <td className="text-right py-2 tabular-nums">
-                              {Number(stock.availableQuantity).toLocaleString(
-                                "ko-KR",
-                              )}
-                            </td>
-                            <td className="text-right py-2 tabular-nums">
-                              {avg.toLocaleString("ko-KR")}
-                            </td>
-                            <td className="text-right py-2 tabular-nums">
-                              {cur.toLocaleString("ko-KR")}
-                            </td>
-                            <td className="text-right py-2 tabular-nums">
-                              {Number(stock.totalBuyAmount).toLocaleString(
-                                "ko-KR",
-                              )}
-                            </td>
-                            <td
-                              className={`text-right py-2 tabular-nums ${color}`}
-                            >
-                              {rate > 0 ? "+" : ""}
-                              {rate.toFixed(2)}%
-                            </td>
-                            <td
-                              className={`text-right py-2 tabular-nums ${color}`}
-                            >
-                              {amount > 0 ? "+" : ""}
-                              {amount.toLocaleString("ko-KR")}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {accountLoading && !accountData && (
-                        <TableSkeleton columns={8} rows={3} />
+                            보유 종목이 없습니다
+                          </td>
+                        </tr>
                       )}
-                      {!accountLoading &&
-                        (!accountData || accountData.holdings.length === 0) && (
-                          <tr>
-                            <td
-                              colSpan={8}
-                              className="pt-12 pb-4 text-center text-zinc-500"
-                            >
-                              보유 종목이 없습니다
-                            </td>
-                          </tr>
-                        )}
-                    </tbody>
-                  </table>
-                </>
+                  </tbody>
+                </table>
               )}
 
               {accountTab === "체결" && (
-                <table className="w-full table-fixed text-xs">
+                <table className="w-full table-fixed text-sm lg:text-xs">
                   <colgroup>
                     <col className="w-[9%]" />
                     <col className="w-[16%]" />
@@ -1057,7 +1169,7 @@ export function TradingPage() {
               )}
 
               {accountTab === "미체결" && (
-                <table className="w-full table-fixed text-xs">
+                <table className="w-full table-fixed text-sm lg:text-xs">
                   <colgroup>
                     <col className="w-[9%]" />
                     <col className="w-[16%]" />
@@ -1138,8 +1250,8 @@ export function TradingPage() {
               )}
 
               {accountTab === "송금" && (
-                <div className="flex flex-row gap-8 items-start">
-                  <div className="flex-4 min-w-0 flex flex-col gap-4">
+                <div className="flex flex-col lg:flex-row gap-4 lg:gap-8 items-start">
+                  <div className="flex-4 min-w-0 w-full flex flex-col gap-4">
                     <div className="flex flex-col gap-1">
                       <label className="text-xs text-zinc-500">
                         보내는 계좌
@@ -1152,7 +1264,7 @@ export function TradingPage() {
                           );
                           if (account) setSelectedAccount(account);
                         }}
-                        className="w-full bg-[#1f232b] text-white text-sm px-3 py-2.5 rounded-lg outline-none appearance-none text-left"
+                        className="w-full bg-[#1f232b] text-white text-base lg:text-sm px-3 py-2.5 rounded-lg outline-none appearance-none text-left"
                       >
                         {accounts.map((a) => (
                           <option key={a.id} value={a.id}>
@@ -1174,7 +1286,7 @@ export function TradingPage() {
                           setTransferTarget(e.target.value.replace(/\D/g, ""))
                         }
                         placeholder="계좌번호를 입력하세요"
-                        className="w-full bg-[#1f232b] text-white placeholder-zinc-600 text-sm px-3 py-2.5 rounded-lg outline-none text-left"
+                        className="w-full bg-[#1f232b] text-white placeholder-zinc-600 text-base lg:text-sm px-3 py-2.5 rounded-lg outline-none text-left"
                       />
                     </div>
 
@@ -1203,7 +1315,7 @@ export function TradingPage() {
                         onChange={(e) =>
                           setTransferAmount(e.target.value.replace(/\D/g, ""))
                         }
-                        className="w-full bg-[#1f232b] text-white placeholder-zinc-600 text-sm px-3 py-2.5 rounded-lg outline-none tabular-nums text-left"
+                        className="w-full bg-[#1f232b] text-white placeholder-zinc-600 text-base lg:text-sm px-3 py-2.5 rounded-lg outline-none tabular-nums text-left"
                       />
                       <span className="text-[10px] text-zinc-600">
                         주문가능금액{" "}
@@ -1215,6 +1327,30 @@ export function TradingPage() {
                           주문 가능 금액이 부족합니다.
                         </p>
                       )}
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-baseline justify-between">
+                        <label className="text-xs text-zinc-500">
+                          보내는 사람 이름
+                        </label>
+                        <span className="text-[10px] text-zinc-600">선택</span>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={20}
+                        value={transferAlias}
+                        onChange={(e) => setTransferAlias(e.target.value)}
+                        placeholder={
+                          selectedAccount
+                            ? String(selectedAccount.accountNumber)
+                            : "계좌번호로 표시됩니다"
+                        }
+                        className="w-full bg-[#1f232b] text-white placeholder-zinc-600 text-base lg:text-sm px-3 py-2.5 rounded-lg outline-none text-left"
+                      />
+                      <span className="text-[10px] text-zinc-600">
+                        받는 사람에게 이 이름으로 표시됩니다
+                      </span>
                     </div>
 
                     <button
@@ -1231,36 +1367,165 @@ export function TradingPage() {
                     </button>
                   </div>
 
-                  <div className="flex-6 min-w-0 flex flex-col gap-1.5">
-                    <span className="text-xs text-zinc-500">
-                      최근 송금 내역
-                    </span>
+                  <div className="flex-6 min-w-0 w-full flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-500">
+                        송금 내역
+                        {transferTotal > 0 && (
+                          <span className="ml-1.5 text-zinc-600 tabular-nums">
+                            {transferTotal}
+                          </span>
+                        )}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTransferSort(
+                              transferSort === "LATEST" ? "OLDEST" : "LATEST",
+                            )
+                          }
+                          className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                        >
+                          {transferSort === "LATEST" ? "최신순" : "오래된순"} ⇅
+                        </button>
+                        <button
+                          type="button"
+                          onClick={refreshTransferHistory}
+                          disabled={transferHistoryLoading}
+                          aria-label="송금 내역 새로고침"
+                          className="flex items-center justify-center w-5 h-5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-[#1f232b] disabled:hover:bg-transparent transition-colors"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${transferHistoryLoading ? "animate-spin" : ""}`}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                            <polyline points="21 3 21 9 15 9" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 보낸/받은 필터 */}
+                    <div className="flex items-center gap-1">
+                      {TRANSFER_FILTERS.map((f) => (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => setTransferDirection(f.key)}
+                          className={`px-2.5 py-1 rounded-md text-[11px] transition-colors ${
+                            transferDirection === f.key
+                              ? "bg-[#1f232b] text-white"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+
                     <div className="rounded-lg border border-[#2b2f36] divide-y divide-[#2b2f36]">
-                      {transferHistory.length === 0 ? (
+                      {transferHistoryLoading ? (
+                        <p className="py-10 text-center text-xs text-zinc-500">
+                          불러오는 중...
+                        </p>
+                      ) : transferHistory.length === 0 ? (
                         <p className="py-10 text-center text-xs text-zinc-500">
                           송금 내역이 없습니다
                         </p>
                       ) : (
-                        transferHistory.map((t) => (
-                          <div
-                            key={t.id}
-                            className="flex items-center justify-between px-3 py-2.5 text-xs"
-                          >
-                            <div className="flex flex-col gap-0.5">
-                              <span className="text-white">
-                                {t.toAccountNumber}
-                              </span>
-                              <span className="text-zinc-500">
-                                {fmtTime(t.createdAt)}
-                              </span>
+                        transferHistory.map((t) => {
+                          const sent = t.direction === "SENT";
+                          const statusLabel = TRANSFER_STATUS_LABEL[t.status];
+                          return (
+                            <div
+                              key={t.id}
+                              className="flex items-center justify-between px-3 py-2.5 text-xs"
+                            >
+                              <div className="flex flex-col gap-0.5 min-w-0">
+                                <span className="text-white truncate">
+                                  <span className="text-zinc-500 mr-1">
+                                    {sent ? "→" : "←"}
+                                  </span>
+                                  {sent
+                                    ? t.recipientAccountNumber
+                                    : t.senderName}
+                                </span>
+                                <span className="text-zinc-500">
+                                  {fmtTransferTime(t.createdAt)}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {statusLabel && (
+                                  <span
+                                    title={
+                                      t.rejectReason
+                                        ? (TRANSFER_REJECT_LABEL[
+                                            t.rejectReason
+                                          ] ?? t.rejectReason)
+                                        : undefined
+                                    }
+                                    className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                      t.status === "REJECTED"
+                                        ? "bg-[#f6465d]/10 text-[#f6465d]"
+                                        : "bg-[#1f232b] text-zinc-400"
+                                    }`}
+                                  >
+                                    {statusLabel}
+                                  </span>
+                                )}
+                                <span
+                                  className={`tabular-nums ${
+                                    t.status === "REJECTED"
+                                      ? "text-zinc-600 line-through"
+                                      : sent
+                                        ? "text-[#f6465d]"
+                                        : "text-[#0ecb81]"
+                                  }`}
+                                >
+                                  {sent ? "-" : "+"}
+                                  {fmtWon(t.amount)} KRW
+                                </span>
+                              </div>
                             </div>
-                            <span className="text-white tabular-nums">
-                              {fmtWon(t.amount)} KRW
-                            </span>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
+
+                    {/* 페이지 이동 */}
+                    {transferTotalPages > 1 && (
+                      <div className="flex items-center justify-center gap-3 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => goToTransferPage(transferPage - 1)}
+                          disabled={transferPage <= 1 || transferHistoryLoading}
+                          className="px-2 py-1 rounded-md text-xs text-zinc-500 hover:text-white hover:bg-[#1f232b] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-500 transition-colors"
+                        >
+                          ‹
+                        </button>
+                        <span className="text-[11px] text-zinc-500 tabular-nums">
+                          {transferPage} / {transferTotalPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => goToTransferPage(transferPage + 1)}
+                          disabled={
+                            transferPage >= transferTotalPages ||
+                            transferHistoryLoading
+                          }
+                          className="px-2 py-1 rounded-md text-xs text-zinc-500 hover:text-white hover:bg-[#1f232b] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-500 transition-colors"
+                        >
+                          ›
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1269,7 +1534,9 @@ export function TradingPage() {
         </div>
 
         {/* 중: 호가창 (기존 렌더 폭 유지) */}
-        <div className="w-[calc(30%-16px)] shrink-0">
+        <div
+          className={`absolute inset-x-3 inset-y-2.5 lg:static lg:w-[calc(30%-16px)] lg:shrink-0 ${mobileTab === "호가" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
+        >
           <OrderBook
             data={data}
             loading={orderbookLoading}
@@ -1277,9 +1544,11 @@ export function TradingPage() {
           />
         </div>
 
-        {/* 우: 주문 + 등락률 */}
-        <div className="flex-2 min-w-0 flex flex-col gap-2.5">
-          <div className="flex-58 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
+        {/* 우: 주문 + 등락률 (모바일에서는 서로 다른 탭이라 wrapper를 contents로 지워 형제로 만든다) */}
+        <div className="contents lg:flex lg:flex-2 lg:min-w-0 lg:flex-col lg:gap-2.5">
+          <div
+            className={`absolute inset-x-3 inset-y-2.5 lg:static lg:flex-58 lg:min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col ${mobileTab === "주문" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
+          >
             <div className="flex items-center gap-3 mb-2 shrink-0 pb-2">
               <button
                 onClick={() => setOrderType("매수")}
@@ -1324,7 +1593,7 @@ export function TradingPage() {
                           );
                           if (account) setSelectedAccount(account);
                         }}
-                        className="w-full bg-[#1f232b] text-white text-xs px-3 py-2 rounded-lg outline-none"
+                        className="w-full bg-[#1f232b] text-white text-base lg:text-xs px-3 py-2 rounded-lg outline-none"
                       >
                         {accounts.map((a) => (
                           <option key={a.id} value={a.id}>
@@ -1442,7 +1711,7 @@ export function TradingPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between shrink-0 px-1 text-xs">
+                    <div className="flex items-center justify-between shrink-0 px-1 text-sm lg:text-xs">
                       <span className="text-zinc-500">총 주문 금액</span>
                       <span className="text-white font-semibold tabular-nums">
                         {orderTotalAmount.toLocaleString("ko-KR")} KRW
@@ -1454,7 +1723,7 @@ export function TradingPage() {
                 {orderType === "정정" &&
                   (selectedOrder ? (
                     <>
-                      <div className="px-3 py-2 bg-[#1f232b] rounded-lg text-xs flex flex-col gap-1.5 shrink-0">
+                      <div className="px-3 py-2 bg-[#1f232b] rounded-lg text-sm lg:text-xs flex flex-col gap-1.5 shrink-0">
                         <div className="flex justify-between">
                           <span className="text-zinc-400">주문 ID</span>
                           <span className="text-white">
@@ -1643,7 +1912,9 @@ export function TradingPage() {
             </div>
           </div>
 
-          <div className="flex-42 min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col">
+          <div
+            className={`absolute inset-x-3 inset-y-2.5 lg:static lg:flex-42 lg:min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col ${mobileTab === "시세" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
+          >
             <div className="flex items-center gap-3 mb-3 shrink-0">
               <button
                 onClick={() => setMarketTab("실시간 등락률")}
@@ -1683,7 +1954,7 @@ export function TradingPage() {
             </div>
             <div className="flex-1 overflow-auto scrollbar-thin">
               {marketTab === "실시간 등락률" && (
-                <table className="w-full text-xs">
+                <table className="w-full text-sm lg:text-xs">
                   <thead className="text-zinc-500 border-b border-[#2b2f36]">
                     <tr>
                       <th className="text-left py-1 w-11">순위</th>
@@ -1743,7 +2014,7 @@ export function TradingPage() {
               )}
 
               {marketTab === "랭킹" && (
-                <table className="w-full table-fixed text-xs">
+                <table className="w-full table-fixed text-sm lg:text-xs">
                   <colgroup>
                     <col className="w-11" />
                     <col />
@@ -1802,6 +2073,33 @@ export function TradingPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* 모바일 하단 탭바 — lg 이상에서는 완전히 숨기고(데스크톱은 다섯 패널 모두 상시 표시),
+          그 아래 iOS 홈 인디케이터 영역만큼 safe-area 패딩을 더해준다. */}
+      <div className="shrink-0 lg:hidden flex items-stretch bg-[#181a20] border-t border-[#21242b] pb-[env(safe-area-inset-bottom)]">
+        {MOBILE_TABS.map((tab) => {
+          const active = mobileTab === tab;
+          const Icon = MOBILE_TAB_ICONS[tab];
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setMobileTab(tab)}
+              aria-label={tab}
+              aria-current={active ? "page" : undefined}
+              className="flex-1 flex items-center justify-center min-h-12"
+            >
+              <span
+                className={`flex items-center justify-center px-4 py-1.5 rounded-lg transition-colors ${
+                  active ? "bg-[#F59E0B]/12 text-[#F59E0B]" : "text-zinc-500"
+                }`}
+              >
+                <Icon />
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {toast && (

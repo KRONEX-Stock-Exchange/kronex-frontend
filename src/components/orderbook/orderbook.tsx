@@ -42,19 +42,24 @@ function MatchHistory({
 
   return (
     <div className="w-full h-full flex flex-col p-2 px-4 overflow-hidden">
-      <div className="text-xs text-zinc-400 mb-2 border-b border-[#2b2f36] pb-1">
+      <div className="text-sm lg:text-xs text-zinc-400 mb-2 border-b border-[#2b2f36] pb-1">
         체결
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
         {matches.slice(0, 50).map((match, i) => {
           const priceNum = toNum(match.price);
           const numberNum = toNum(match.quantity);
           return (
-            <div key={i} className="flex justify-between text-xs py-0.5">
-              <span className={getPriceColor(priceNum)}>
+            <div
+              key={i}
+              className="flex justify-between text-sm lg:text-xs py-0.5 tabular-nums lg:normal-nums"
+            >
+              <span className={`${getPriceColor(priceNum)} whitespace-nowrap`}>
                 {priceNum.toLocaleString()}
               </span>
-              <span className={getNumberColor(match.type)}>
+              <span
+                className={`${getNumberColor(match.type)} whitespace-nowrap`}
+              >
                 {numberNum.toLocaleString()}
               </span>
             </div>
@@ -97,10 +102,12 @@ function StockInfoPanel({ stockInfo }: { stockInfo: StockInfo | null }) {
         return (
           <div
             key={i}
-            className="flex justify-between text-xs py-1 border-b border-[#2b2f36]"
+            className="flex justify-between text-sm lg:text-xs py-1 border-b border-[#2b2f36] tabular-nums lg:normal-nums"
           >
-            <span className="text-zinc-500">{item.label}</span>
-            <span className="flex gap-2">
+            <span className="text-zinc-500 whitespace-nowrap">
+              {item.label}
+            </span>
+            <span className="flex gap-2 whitespace-nowrap">
               {item.showPercent && (
                 <span className={color}>
                   {pct > 0 ? "+" : ""}
@@ -354,17 +361,19 @@ export function OrderBook({ data, loading, isMarketClosed }: OrderBookProps) {
       {/* 총 잔량 */}
       <div className="h-[4%] flex items-center border-t border-[#2b2f36]">
         <div className="w-[23%] flex justify-end items-center pr-2">
-          <span className="text-xs text-[#2563eb]">
+          <span className="text-sm lg:text-xs text-[#2563eb] whitespace-nowrap tabular-nums lg:normal-nums">
             {sellTotal.toLocaleString()}
           </span>
         </div>
         <div className="w-[15%]" />
         <div className="w-[24%] flex justify-center items-center">
-          <span className="text-[10px] text-zinc-500">총 잔량</span>
+          <span className="text-xs lg:text-[10px] text-zinc-500 whitespace-nowrap">
+            총 잔량
+          </span>
         </div>
         <div className="w-[15%]" />
         <div className="w-[23%] flex justify-start items-center pl-2">
-          <span className="text-xs text-[#f6465d]">
+          <span className="text-sm lg:text-xs text-[#f6465d] whitespace-nowrap tabular-nums lg:normal-nums">
             {buyTotal.toLocaleString()}
           </span>
         </div>

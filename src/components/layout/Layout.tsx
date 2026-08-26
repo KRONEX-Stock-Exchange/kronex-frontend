@@ -6,7 +6,7 @@ import { UpdateAvailableBanner } from "../common/UpdateAvailableBanner";
 export function Layout() {
   return (
     <AccountProvider>
-      <div className="flex flex-col h-screen">
+      <div className="flex flex-col h-dvh">
         <Header />
         <main className="flex-1 overflow-hidden">
           <Outlet />

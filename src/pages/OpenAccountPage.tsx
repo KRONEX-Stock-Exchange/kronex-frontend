@@ -35,7 +35,7 @@ export function OpenAccountPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#14161b] px-4">
+    <div className="min-h-dvh flex items-center justify-center bg-[#14161b] px-4">
       <div className="w-full max-w-100">
         {/* 헤더 */}
         <div className="mb-10 text-center">

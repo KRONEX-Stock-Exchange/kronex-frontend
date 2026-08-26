@@ -44,7 +44,7 @@ export function UpdateAvailableBanner() {
   if (!updateAvailable) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-[9999] flex -translate-x-1/2 items-center gap-3 rounded-lg border border-[#2b2f36] bg-[#181a20] px-4 py-2.5 text-sm text-zinc-200 shadow-2xl">
+    <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] lg:bottom-4 left-1/2 z-[9999] flex max-w-[92vw] -translate-x-1/2 items-center gap-3 rounded-lg border border-[#2b2f36] bg-[#181a20] px-4 py-2.5 text-sm text-zinc-200 shadow-2xl">
       새 버전이 있습니다.
       <button
         onClick={() => window.location.reload()}

@@ -698,13 +698,18 @@ export function CandlestickChart({ stockId, avgPrice }: CandlestickChartProps) {
       legend.innerHTML = items.join("");
     });
 
-    const handleResize = () => {
-      chart.applyOptions({
-        width: container.clientWidth,
-        height: container.clientHeight,
-      });
-    };
-    window.addEventListener("resize", handleResize);
+    // ResizeObserver로 컨테이너 크기 변화를 추적한다. window resize 이벤트만 쓰면
+    // 모바일 탭 전환처럼 컨테이너가 display:none → 다시 보이는 경우 리사이즈가 감지되지
+    // 않아 차트가 0x0으로 굳어버릴 수 있는데, ResizeObserver는 그 전환에도 콜백이 온다.
+    // 0 크기(숨김 상태)일 때는 applyOptions를 건너뛰어 차트 내부 상태가 깨지지 않게 한다.
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width === 0 || height === 0) return;
+      chart.applyOptions({ width, height });
+    });
+    resizeObserver.observe(container);
 
     // 가격축 드래그 리스케일, 자동 배율(autoScale) 애니메이션 등 위치가 바뀔 수 있는
     // 모든 경우를 일일이 추적하는 대신 매 프레임 라벨 좌표를 다시 계산해 항상 따라오게 한다
@@ -750,7 +755,7 @@ export function CandlestickChart({ stockId, avgPrice }: CandlestickChartProps) {
 
     return () => {
       cancelAnimationFrame(minMaxRafId);
-      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       container.removeEventListener("pointerdown", onPointerDown);
       container.removeEventListener("pointermove", onPointerMove);
       container.removeEventListener("pointerup", onPointerUp);
@@ -1075,38 +1080,42 @@ export function CandlestickChart({ stockId, avgPrice }: CandlestickChartProps) {
     <div className="w-full h-full bg-[#181a20] rounded-xl overflow-hidden p-2 flex flex-col">
       {/* 상단 툴바: 시간대 선택 + MA 범례 */}
       <div className="flex items-center gap-1 mb-1 shrink-0">
-        <div className="flex gap-0.5">
-          {CHART_TYPES.map((ct) => (
-            <button
-              key={ct.value}
-              onClick={() => setChartType(ct.value)}
-              className={`px-2 py-0.5 text-xs rounded-md transition-colors ${
-                chartType === ct.value
-                  ? "bg-[#2b2f36] text-white"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {ct.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-3 ml-3 border-l border-[#2b2f36] pl-3">
-          {MA_CONFIGS.map((ma) => (
-            <span
-              key={ma.period}
-              className="text-[10px]"
-              style={{ color: ma.color }}
-            >
-              MA{ma.period}
-            </span>
-          ))}
+        {/* 시간대 버튼 + MA 범례만 가로 스크롤 대상으로 묶는다. 설정 버튼/드롭다운은
+            이 스크롤 컨테이너 밖에 둬야 드롭다운이 overflow에 잘리지 않는다. */}
+        <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
+          <div className="flex gap-0.5 shrink-0">
+            {CHART_TYPES.map((ct) => (
+              <button
+                key={ct.value}
+                onClick={() => setChartType(ct.value)}
+                className={`px-3 py-3.5 lg:px-2 lg:py-0.5 text-xs rounded-md transition-colors whitespace-nowrap ${
+                  chartType === ct.value
+                    ? "bg-[#2b2f36] text-white"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {ct.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 ml-3 border-l border-[#2b2f36] pl-3 shrink-0">
+            {MA_CONFIGS.map((ma) => (
+              <span
+                key={ma.period}
+                className="text-[10px] whitespace-nowrap"
+                style={{ color: ma.color }}
+              >
+                MA{ma.period}
+              </span>
+            ))}
+          </div>
         </div>
 
-        <div ref={settingsRef} className="relative ml-auto">
+        <div ref={settingsRef} className="relative ml-auto shrink-0">
           <button
             onClick={() => setSettingsOpen((v) => !v)}
             aria-label="차트 설정"
-            className={`flex items-center justify-center w-6 h-6 rounded-md transition-colors ${
+            className={`flex items-center justify-center w-11 h-11 lg:w-6 lg:h-6 rounded-md transition-colors ${
               settingsOpen
                 ? "bg-[#2b2f36] text-white"
                 : "text-zinc-500 hover:text-zinc-300"
@@ -1142,25 +1151,25 @@ export function CandlestickChart({ stockId, avgPrice }: CandlestickChartProps) {
             <div className="overflow-hidden bg-[#181a20] border border-[#2b2f36] rounded-lg shadow-2xl p-2">
               <div
                 onClick={() => setShowMinMax((v) => !v)}
-                className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer"
+                className="flex items-center justify-between gap-2 px-1.5 py-2.5 lg:py-1 text-xs text-zinc-300 cursor-pointer"
               >
                 고점/저점 표시
                 <ToggleSwitch checked={showMinMax} />
               </div>
               <div
                 onClick={() => setShowAvgPrice((v) => !v)}
-                className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer"
+                className="flex items-center justify-between gap-2 px-1.5 py-2.5 lg:py-1 text-xs text-zinc-300 cursor-pointer"
               >
                 매입가 표시
                 <ToggleSwitch checked={showAvgPrice} />
               </div>
               <div className="my-1 border-t border-[#2b2f36]" />
-              <div className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300">
+              <div className="flex items-center justify-between gap-2 px-1.5 py-2.5 lg:py-1 text-xs text-zinc-300">
                 표시 방향
                 <div className="flex gap-0.5 bg-[#0d0e11] rounded-md p-0.5">
                   <button
                     onClick={() => setLegendLayout("horizontal")}
-                    className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                    className={`px-2 py-2 lg:px-1.5 lg:py-0.5 rounded text-[10px] transition-colors ${
                       legendLayout === "horizontal"
                         ? "bg-[#2b2f36] text-white"
                         : "text-zinc-500 hover:text-zinc-300"
@@ -1170,7 +1179,7 @@ export function CandlestickChart({ stockId, avgPrice }: CandlestickChartProps) {
                   </button>
                   <button
                     onClick={() => setLegendLayout("vertical")}
-                    className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                    className={`px-2 py-2 lg:px-1.5 lg:py-0.5 rounded text-[10px] transition-colors ${
                       legendLayout === "vertical"
                         ? "bg-[#2b2f36] text-white"
                         : "text-zinc-500 hover:text-zinc-300"
@@ -1190,7 +1199,7 @@ export function CandlestickChart({ stockId, avgPrice }: CandlestickChartProps) {
                       [key]: !prev[key],
                     }))
                   }
-                  className="flex items-center justify-between gap-2 px-1.5 py-1 text-xs text-zinc-300 cursor-pointer"
+                  className="flex items-center justify-between gap-2 px-1.5 py-2.5 lg:py-1 text-xs text-zinc-300 cursor-pointer"
                 >
                   {label}
                   <ToggleSwitch checked={legendOptions[key]} />
@@ -1292,7 +1301,10 @@ export function CandlestickChart({ stockId, avgPrice }: CandlestickChartProps) {
         >
           매입가
         </div>
-        <div ref={containerRef} className="w-full h-full" />
+        {/* touch-none: lightweight-charts가 팬/핀치줌을 자체 처리하므로, 차트 위 세로
+            스와이프가 브라우저 네이티브 스크롤(페이지 전체 스크롤)로 새는 것을 막는다.
+            touch-action은 렌더링에 영향이 없어 데스크톱 픽셀에는 아무 변화가 없다. */}
+        <div ref={containerRef} className="w-full h-full touch-none" />
 
         {/* API 서버 + realtime 서버 데이터가 모두 도착할 때까지 덮어둔다 */}
         {chartLoading && (

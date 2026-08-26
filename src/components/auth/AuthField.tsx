@@ -81,7 +81,7 @@ export function AuthField({
           required={required}
           aria-invalid={!!error}
           aria-describedby={error || hint ? `${id}-desc` : undefined}
-          className={`w-full rounded-lg border bg-[#1f232b] px-4 py-3.5 text-sm text-white placeholder-zinc-500 outline-none transition-[color,border-color,box-shadow] focus:ring-2 ${
+          className={`w-full rounded-lg border bg-[#1f232b] px-4 py-3.5 text-base lg:text-sm text-white placeholder-zinc-500 outline-none transition-[color,border-color,box-shadow] focus:ring-2 ${
             isPassword ? "pr-11" : ""
           } ${
             error

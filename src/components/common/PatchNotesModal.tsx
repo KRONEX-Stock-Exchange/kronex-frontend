@@ -9,8 +9,17 @@ interface PatchNoteGroup {
 
 const PATCH_NOTES: PatchNoteGroup[] = [
   {
+    version: "v0.6.5",
+    date: "2026-08-26",
+    added: [
+      "송금 기능 추가",
+      "모바일 반응형 UI 추가 (좁은 화면에서 차트/호가/주문/계좌/시세를 하단 탭으로 전환)",
+    ],
+    fixed: ["계좌 UI/UX 개선"],
+  },
+  {
     version: "v0.6.0",
-    date: "2026-08-24",
+    date: "2026-08-25",
     added: [
       "패치노트 기능 추가",
       "휴장 시간 추가 (매일 UTC 00:00~00:05, KST 09:00 ~ 09:05 거래 제한)",
@@ -68,12 +77,12 @@ export function PatchNotesModal({
         }`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-5 border-b border-[#2b2f36]">
+        <div className="flex items-center justify-between px-4 lg:px-6 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] border-b border-[#2b2f36]">
           <h2 className="text-lg font-semibold text-white">패치노트</h2>
           <button
             onClick={onClose}
             aria-label="닫기"
-            className="flex items-center justify-center w-8 h-8 rounded-lg text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
+            className="flex items-center justify-center min-w-11 min-h-11 lg:min-w-0 lg:min-h-0 lg:w-8 lg:h-8 rounded-lg text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
           >
             <svg
               width="16"
@@ -90,7 +99,7 @@ export function PatchNotesModal({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 lg:px-6 pt-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
           <div className="relative">
             <div className="absolute left-1.25 top-2 bottom-2 w-px bg-[#2b2f36]" />
             <div className="space-y-10">
@@ -102,7 +111,7 @@ export function PatchNotesModal({
                   { label: "수정", items: group.fixed ?? [] },
                 ].filter((s) => s.items.length > 0);
                 return (
-                  <div key={group.version} className="relative pl-9">
+                  <div key={group.version} className="relative pl-7 lg:pl-9">
                     <div
                       className={`absolute left-0 top-1.5 w-2.75 h-2.75 rounded-full border-2 ${
                         isLatest

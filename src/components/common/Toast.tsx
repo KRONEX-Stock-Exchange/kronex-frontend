@@ -61,7 +61,7 @@ export function Toast({
     <div
       role="status"
       aria-live="polite"
-      className={`fixed bottom-5 left-1/2 z-50 flex max-w-[90vw] items-center gap-2.5 rounded-xl border border-[#21242b] bg-[#181a20] pl-3.5 pr-2 py-2.5 shadow-lg shadow-black/40 transition-[opacity,transform] duration-300 ease-out ${
+      className={`fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] lg:bottom-5 left-1/2 z-50 flex max-w-[90vw] items-center gap-2.5 rounded-xl border border-[#21242b] bg-[#181a20] pl-3.5 pr-2 py-2.5 shadow-lg shadow-black/40 transition-[opacity,transform] duration-300 ease-out ${
         visible ? "opacity-100" : "opacity-0"
       }`}
       style={{

@@ -86,9 +86,9 @@ export function Header() {
   };
 
   return (
-    <header className="flex items-center justify-between px-6 py-4 bg-[#181a20] border-b border-[#21242b]">
+    <header className="flex items-center justify-between px-4 py-3 lg:px-6 lg:py-4 bg-[#181a20] border-b border-[#21242b]">
       <div className="flex items-center gap-2">
-        <span className="text-2xl tracking-tight text-white font-['Archivo_Black']">
+        <span className="text-xl lg:text-2xl tracking-tight text-white font-['Archivo_Black']">
           <span className="text-[#F59E0B]">K</span>RONEX
         </span>
       </div>
@@ -98,7 +98,7 @@ export function Header() {
           onClick={() => setOpen((v) => !v)}
           aria-label="메뉴"
           aria-expanded={open}
-          className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+          className={`flex items-center justify-center min-w-11 min-h-11 lg:min-w-0 lg:min-h-0 lg:w-8 lg:h-8 rounded-lg transition-colors ${
             open
               ? "text-zinc-200 bg-[#1f232b]"
               : "text-zinc-500 hover:text-zinc-300 hover:bg-[#1f232b]/60"
@@ -124,7 +124,7 @@ export function Header() {
         </button>
 
         <div
-          className={`absolute top-full right-0 mt-1.5 z-50 grid w-44 transition-[grid-template-rows,opacity] duration-200 ease-out ${
+          className={`absolute top-full right-0 mt-1.5 z-50 grid w-52 lg:w-44 transition-[grid-template-rows,opacity] duration-200 ease-out ${
             open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0 pointer-events-none"
           }`}
         >
@@ -134,7 +134,7 @@ export function Header() {
                 <Link
                   to="/"
                   onClick={() => setOpen(false)}
-                  className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
+                  className="flex items-center gap-2.5 px-4 py-3.5 lg:py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
                 >
                   <TradeIcon />
                   거래하기
@@ -142,7 +142,7 @@ export function Header() {
                 <Link
                   to="/open-account"
                   onClick={() => setOpen(false)}
-                  className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
+                  className="flex items-center gap-2.5 px-4 py-3.5 lg:py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
                 >
                   <AccountIcon />
                   계좌개설
@@ -153,7 +153,7 @@ export function Header() {
                 <Link
                   to="/login"
                   onClick={() => setOpen(false)}
-                  className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
+                  className="flex items-center gap-2.5 px-4 py-3.5 lg:py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
                 >
                   <LoginIcon />
                   로그인
@@ -161,7 +161,7 @@ export function Header() {
                 <Link
                   to="/register"
                   onClick={() => setOpen(false)}
-                  className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
+                  className="flex items-center gap-2.5 px-4 py-3.5 lg:py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
                 >
                   <AccountIcon />
                   회원가입
@@ -173,7 +173,7 @@ export function Header() {
                 setOpen(false);
                 setPatchNotesOpen(true);
               }}
-              className="flex items-center gap-2.5 w-full text-left px-4 py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
+              className="flex items-center gap-2.5 w-full text-left px-4 py-3.5 lg:py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] transition-colors"
             >
               <PatchNoteIcon />
               패치노트
@@ -181,7 +181,7 @@ export function Header() {
             {isLoggedIn && (
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-2.5 w-full text-left px-4 py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] border-t border-[#21242b] transition-colors"
+                className="flex items-center gap-2.5 w-full text-left px-4 py-3.5 lg:py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-[#1f232b] border-t border-[#21242b] transition-colors"
               >
                 <LogoutIcon />
                 로그아웃

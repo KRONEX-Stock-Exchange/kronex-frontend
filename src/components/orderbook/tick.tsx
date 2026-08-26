@@ -74,19 +74,19 @@ export function Tick({
               style={{ width: `${barWidth}%` }}
             ></div>
             {diffText && (
-              <span className={`absolute left-1 z-10 text-xs font-medium ${diffColor}`}>
+              <span className={`absolute left-1 z-10 text-xs font-medium whitespace-nowrap ${diffColor}`}>
                 {diffText}
               </span>
             )}
-            <div className="relative z-10 m-2 text-sm text-white">
+            <div className="relative z-10 m-2 text-base lg:text-sm text-white whitespace-nowrap tabular-nums lg:normal-nums">
               {numberNum.toLocaleString()}
             </div>
           </div>
           <div className="w-[15%] h-full border-r flex justify-center items-center border-[rgb(43,47,54)] bg-[#1e2329]">
-            <div className={`text-sm ${getTextColor()}`}>{changeText}</div>
+            <div className={`text-base lg:text-sm whitespace-nowrap ${getTextColor()}`}>{changeText}</div>
           </div>
           <div className={`w-[24%] h-full flex justify-center items-center bg-[#1e2329] ${getPriceBoxRing()}`}>
-            <div className={`text-sm font-medium ${getTextColor()}`}>
+            <div className={`text-base lg:text-sm font-medium whitespace-nowrap tabular-nums lg:normal-nums ${getTextColor()}`}>
               {priceNum.toLocaleString()}
             </div>
           </div>
@@ -101,23 +101,23 @@ export function Tick({
       <div className="flex h-full">
         <div className="w-[38%] h-full bg-[#181a20]"></div>
         <div className={`w-[24%] h-full flex justify-center items-center bg-[#1e2329] ${getPriceBoxRing()}`}>
-          <div className={`text-sm font-medium ${getTextColor()}`}>
+          <div className={`text-base lg:text-sm font-medium whitespace-nowrap tabular-nums lg:normal-nums ${getTextColor()}`}>
             {priceNum.toLocaleString()}
           </div>
         </div>
         <div className="w-[15%] h-full border-l flex justify-center items-center border-[rgb(43,47,54)] bg-[#1e2329]">
-          <div className={`text-sm ${getTextColor()}`}>{changeText}</div>
+          <div className={`text-base lg:text-sm whitespace-nowrap ${getTextColor()}`}>{changeText}</div>
         </div>
         <div className="w-[23%] h-full flex justify-start items-center bg-[#181a20] relative">
           <div
             className="absolute left-0 h-[90%] bg-[#f6465d]/15"
             style={{ width: `${barWidth}%` }}
           ></div>
-          <div className="relative z-10 m-2 text-sm text-white">
+          <div className="relative z-10 m-2 text-base lg:text-sm text-white whitespace-nowrap tabular-nums lg:normal-nums">
             {numberNum.toLocaleString()}
           </div>
           {diffText && (
-            <span className={`absolute right-1 z-10 text-xs font-medium ${diffColor}`}>
+            <span className={`absolute right-1 z-10 text-xs font-medium whitespace-nowrap ${diffColor}`}>
               {diffText}
             </span>
           )}
