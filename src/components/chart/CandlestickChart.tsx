@@ -428,6 +428,12 @@ export function CandlestickChart({
   const lowMarkerLabelRef = useRef<HTMLSpanElement>(null);
   const lowArrowRef = useRef<SVGSVGElement>(null);
   const lastPriceMarkerRef = useRef<HTMLDivElement>(null);
+  // 크로스헤어(선택한 캔들) 가격축 라벨을 직접 HTML로 그린다. lightweight-charts의
+  // 기본 라벨은 캔버스에 그려져 HTML인 현재가 배지 밑에 깔리는데, 이걸 HTML로 올려
+  // 현재가 배지보다 위에 두면 겹칠 때 선택 캔들 라벨이 우선한다.
+  const crosshairLabelRef = useRef<HTMLDivElement>(null);
+  // 크로스헤어가 자석 스냅된 가격. null이면 크로스헤어가 차트 밖.
+  const crosshairSnapPriceRef = useRef<number | null>(null);
   const lastPriceValueRef = useRef<HTMLSpanElement>(null);
   const lastPricePctRef = useRef<HTMLSpanElement>(null);
   const avgPriceLabelRef = useRef<HTMLDivElement>(null);
@@ -699,6 +705,30 @@ export function CandlestickChart({
     }
   };
 
+  // 크로스헤어(선택 캔들) 가격축 라벨 — 직접 그려서 현재가 배지 위에 올린다.
+  const updateCrosshairLabel = () => {
+    const series = candleSeriesRef.current;
+    const chart = chartRef.current;
+    const container = containerRef.current;
+    const el = crosshairLabelRef.current;
+    if (!series || !chart || !container || !el) return;
+
+    const price = crosshairSnapPriceRef.current;
+    if (price === null) {
+      el.style.display = "none";
+      return;
+    }
+    const y = series.priceToCoordinate(price);
+    if (y === null || y < 0 || y > container.clientHeight) {
+      el.style.display = "none";
+      return;
+    }
+    el.style.display = "block";
+    el.style.left = `${container.clientWidth - chart.priceScale("right").width()}px`;
+    el.style.top = `${y}px`;
+    el.textContent = price.toLocaleString("ko-KR");
+  };
+
   // 평단가 선의 왼쪽 끝에 "매입가" 태그를 띄운다 (가격 자체는 오른쪽 가격축에 표시)
   const updateAvgPriceLabel = () => {
     const series = candleSeriesRef.current;
@@ -733,6 +763,7 @@ export function CandlestickChart({
   // 화면에 보이는 구간의 최고/최저 캔들 위치에 작은 화살표 라벨을 띄운다
   const updateMinMaxLines = () => {
     updateLastPriceBadge();
+    updateCrosshairLabel();
     updateAvgPriceLabel();
 
     const series = candleSeriesRef.current;
@@ -1095,7 +1126,13 @@ export function CandlestickChart({
       crosshair: {
         mode: CrosshairMode.Magnet,
         vertLine: { color: "#505050", labelBackgroundColor: "#2b2f36" },
-        horzLine: { color: "#505050", labelBackgroundColor: "#2b2f36" },
+        // 가격축 라벨은 캔버스라 HTML 현재가 배지 밑에 깔린다. 끄고 직접 HTML로
+        // 그려(updateCrosshairLabel) 배지 위에 올린다.
+        horzLine: {
+          color: "#505050",
+          labelBackgroundColor: "#2b2f36",
+          labelVisible: false,
+        },
       },
       timeScale: {
         borderColor: "#2b2f36",
@@ -1174,6 +1211,7 @@ export function CandlestickChart({
       if (!legend) return;
       if (!param.time || !param.seriesData.has(candleSeries)) {
         legend.style.display = "none";
+        crosshairSnapPriceRef.current = null;
         return;
       }
       const ohlc = param.seriesData.get(candleSeries) as {
@@ -1187,7 +1225,28 @@ export function CandlestickChart({
           ?.value ?? 0;
       if (!ohlc) {
         legend.style.display = "none";
+        crosshairSnapPriceRef.current = null;
         return;
+      }
+
+      // CrosshairMode.Magnet은 커서에서 가장 가까운 시리즈의 "종가"(캔들=close,
+      // 라인=value)로 스냅한다. 우리 HTML 가격 라벨도 그 값에 맞춰 그리기 위해 기록.
+      const rawY = param.point?.y;
+      const rawPrice =
+        rawY !== undefined ? candleSeries.coordinateToPrice(rawY) : null;
+      if (rawPrice !== null) {
+        let snapped = ohlc.close;
+        let bestDiff = Math.abs(ohlc.close - rawPrice);
+        for (const ma of maSeries) {
+          const mv = param.seriesData.get(ma) as { value: number } | undefined;
+          if (mv && Math.abs(mv.value - rawPrice) < bestDiff) {
+            bestDiff = Math.abs(mv.value - rawPrice);
+            snapped = mv.value;
+          }
+        }
+        crosshairSnapPriceRef.current = snapped;
+      } else {
+        crosshairSnapPriceRef.current = null;
       }
 
       const key = paramTimeToKey(param.time);
@@ -3195,6 +3254,12 @@ export function CandlestickChart({
               className="whitespace-nowrap text-[11px] font-bold leading-tight text-white"
             />
           </div>
+          {/* 크로스헤어(선택 캔들) 가격축 라벨 — z를 현재가 배지보다 높게 둬서 겹치면 위로 */}
+          <div
+            ref={crosshairLabelRef}
+            className="absolute z-30 whitespace-nowrap rounded-none bg-[#2b2f36] px-1.5 py-0.5 text-[11px] leading-tight text-zinc-200 pointer-events-none"
+            style={{ display: "none", transform: "translateY(-50%)" }}
+          />
           {/* 평단가 선 왼쪽 끝에 뜨는 "매입가" 태그 (가격 값은 오른쪽 가격축 라벨에 표시) */}
           <div
             ref={avgPriceLabelRef}
