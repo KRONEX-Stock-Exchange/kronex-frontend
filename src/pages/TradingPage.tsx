@@ -565,14 +565,27 @@ export function TradingPage() {
       : Number(livePrice ?? data?.stockInfo?.price ?? 0)) *
     (parseInt(quantity) || 0);
 
-  // 종목이 바뀌면(가격 초기화가 끝난 뒤) 퍼센트바로 잡아둔 수량도 새 종목 기준으로 다시 계산한다.
+  // 퍼센트바로 수량을 잡아둔 상태(orderPercent > 0)에서 계산 근거가 바뀌면
+  // 그 퍼센트 기준으로 수량을 다시 계산한다:
+  //   종목 전환 / 매수·매도 전환 / 지정가·시장가 전환 / 지정가 가격 수정 /
+  //   계좌 변경 / 주문가능금액·보유수량·상한가 갱신
   // (퍼센트를 아직 안 건드렸으면 0%라 재계산할 의미가 없으므로 건너뛴다)
   useEffect(() => {
     if (orderPercent <= 0) return;
     const qty = computeQuantityForPercent(orderPercent);
     if (qty !== null) setQuantity(qty);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pricedStockId]);
+  }, [
+    pricedStockId,
+    orderType,
+    priceType,
+    price,
+    orderPercent,
+    selectedAccount?.id,
+    accountData?.account?.availableBalance,
+    accountData?.holdings,
+    data?.stockInfo?.upperLimit,
+  ]);
 
   useEffect(() => {
     const fetchStocks = async () => {
@@ -1678,7 +1691,12 @@ export function TradingPage() {
                       <StepperInput
                         label="주문수량"
                         value={quantity}
-                        onChange={setQuantity}
+                        onChange={(v) => {
+                          // 수량을 직접 만지면 퍼센트 모드에서 빠져나온다 —
+                          // 안 그러면 이후 재계산 effect가 방금 입력한 값을 덮어쓴다.
+                          setQuantity(v);
+                          setOrderPercent(0);
+                        }}
                         onStep={(current, dir) => Math.max(0, current + dir)}
                       />
                     </div>
