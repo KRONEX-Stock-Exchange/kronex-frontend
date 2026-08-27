@@ -414,6 +414,20 @@ export function TradingPage() {
   // 모바일 하단 탭바에서 선택된 패널. lg 이상에서는 쓰이지 않는다(다섯 패널 모두 표시).
   const [mobileTab, setMobileTab] = useState<MobileTab>("차트");
   const [stockId, setStockId] = useState<number | null>(null);
+
+  // 차트 전체화면. 차트 컴포넌트가 스스로 화면을 덮으면 종목 정보 바(StockHeader)까지
+  // 가려지므로, 상태만 넘겨받아 이 페이지가 덮는다.
+  const [chartFullscreen, setChartFullscreen] = useState(false);
+  const chartBoxRef = useRef<HTMLDivElement | null>(null);
+  const handleChartFullscreenChange = (fullscreen: boolean) => {
+    setChartFullscreen(fullscreen);
+  };
+  // 전체화면일 때 차트 외 패널을 숨긴다. 이 패널들은 `contents lg:flex` 처럼
+  // 반응형 display 유틸을 쓰고 있어서 `hidden` 클래스를 얹으면 lg 변형에 밀린다.
+  // 인라인 style이 클래스보다 우선하므로 브레이크포인트와 무관하게 확실히 숨는다.
+  const hideWhenFs = chartFullscreen
+    ? ({ display: "none" } as const)
+    : undefined;
   const { data, loading: orderbookLoading } = useOrderbook(stockId);
   const { accounts, selectedAccount, setSelectedAccount } = useAccount();
   const {
@@ -805,8 +819,14 @@ export function TradingPage() {
   const closedCountdownLabel = `${String(Math.floor(secondsUntilOpen / 60)).padStart(2, "0")}:${String(secondsUntilOpen % 60).padStart(2, "0")}`;
 
   return (
-    <div className="flex flex-col h-full w-full">
-      {/* 종목 선택 바는 거래 화면 전체 폭을 사용한다. */}
+    <div
+      className={
+        chartFullscreen
+          ? "fixed inset-0 z-90 flex flex-col bg-[#18181b]"
+          : "flex flex-col h-full w-full"
+      }
+    >
+      {/* 종목 선택 바는 거래 화면 전체 폭을 사용한다. (전체화면에서도 남긴다) */}
       <div className="shrink-0 px-3 lg:px-5 pt-2.5">
         <StockHeader
           stockInfo={data?.stockInfo ?? null}
@@ -814,6 +834,7 @@ export function TradingPage() {
           selectedStockId={stockId}
           onSelectStock={setStockId}
           contentWidthTarget={chartPanel}
+          contentWidthScale={chartFullscreen ? 0.5 : 1}
           isMarketClosed={isMarketClosed}
         />
       </div>
@@ -830,15 +851,29 @@ export function TradingPage() {
         {/* 좌: 차트 + 계좌 (모바일에서는 서로 다른 탭이라 wrapper를 contents로 지워 형제로 만든다) */}
         <div
           ref={setChartPanel}
-          className="contents lg:flex lg:flex-5 lg:min-w-0 lg:min-h-0 lg:flex-col lg:gap-2.5"
+          className={
+            chartFullscreen
+              ? "flex flex-1 min-w-0 min-h-0 flex-col"
+              : "contents lg:flex lg:flex-5 lg:min-w-0 lg:min-h-0 lg:flex-col lg:gap-2.5"
+          }
         >
           <div
-            className={`absolute inset-x-3 inset-y-2.5 lg:static lg:flex-52 lg:min-h-0 ${mobileTab === "차트" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
+            ref={chartBoxRef}
+            className={
+              chartFullscreen
+                ? "flex-1 min-h-0"
+                : `absolute inset-x-3 inset-y-2.5 lg:static lg:flex-58 lg:min-h-0 ${mobileTab === "차트" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`
+            }
           >
-            <CandlestickChart stockId={stockId} avgPrice={currentAvgPrice} />
+            <CandlestickChart
+              stockId={stockId}
+              avgPrice={currentAvgPrice}
+              onFullscreenChange={handleChartFullscreenChange}
+            />
           </div>
           <div
-            className={`absolute inset-x-3 inset-y-2.5 lg:static lg:flex-48 lg:min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col ${mobileTab === "계좌" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
+            style={hideWhenFs}
+            className={`absolute inset-x-3 inset-y-2.5 lg:static lg:flex-42 lg:min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col ${mobileTab === "계좌" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
           >
             <div className="flex items-center gap-4 mb-3 shrink-0">
               {(["계좌", "체결", "미체결", "송금"] as AccountTab[]).map(
@@ -1318,7 +1353,7 @@ export function TradingPage() {
                         className="w-full bg-[#1f232b] text-white placeholder-zinc-600 text-base lg:text-sm px-3 py-2.5 rounded-lg outline-none tabular-nums text-left"
                       />
                       <span className="text-[10px] text-zinc-600">
-                        주문가능금액{" "}
+                        송금가능금액{" "}
                         {fmtWon(accountData?.account?.availableBalance ?? "0")}{" "}
                         KRW
                       </span>
@@ -1535,6 +1570,7 @@ export function TradingPage() {
 
         {/* 중: 호가창 (기존 렌더 폭 유지) */}
         <div
+          style={hideWhenFs}
           className={`absolute inset-x-3 inset-y-2.5 lg:static lg:w-[calc(30%-16px)] lg:shrink-0 ${mobileTab === "호가" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
         >
           <OrderBook
@@ -1545,7 +1581,10 @@ export function TradingPage() {
         </div>
 
         {/* 우: 주문 + 등락률 (모바일에서는 서로 다른 탭이라 wrapper를 contents로 지워 형제로 만든다) */}
-        <div className="contents lg:flex lg:flex-2 lg:min-w-0 lg:flex-col lg:gap-2.5">
+        <div
+          style={hideWhenFs}
+          className="contents lg:flex lg:flex-2 lg:min-w-0 lg:flex-col lg:gap-2.5"
+        >
           <div
             className={`absolute inset-x-3 inset-y-2.5 lg:static lg:flex-58 lg:min-h-0 bg-[#181a20] rounded-xl p-4 flex flex-col ${mobileTab === "주문" ? "visible" : "invisible pointer-events-none"} lg:visible lg:pointer-events-auto`}
           >
@@ -2077,7 +2116,11 @@ export function TradingPage() {
 
       {/* 모바일 하단 탭바 — lg 이상에서는 완전히 숨기고(데스크톱은 다섯 패널 모두 상시 표시),
           그 아래 iOS 홈 인디케이터 영역만큼 safe-area 패딩을 더해준다. */}
-      <div className="shrink-0 lg:hidden flex items-stretch bg-[#181a20] border-t border-[#21242b] pb-[env(safe-area-inset-bottom)]">
+      <div
+        className={`shrink-0 lg:hidden items-stretch bg-[#181a20] border-t border-[#21242b] pb-[env(safe-area-inset-bottom)] ${
+          chartFullscreen ? "hidden" : "flex"
+        }`}
+      >
         {MOBILE_TABS.map((tab) => {
           const active = mobileTab === tab;
           const Icon = MOBILE_TAB_ICONS[tab];

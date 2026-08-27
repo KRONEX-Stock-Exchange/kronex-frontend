@@ -15,6 +15,9 @@ interface StockHeaderProps {
   onSelectStock: (id: number) => void;
   // 종목 선택 영역(드롭다운 포함)을 차트 패널 폭에 맞춘다.
   contentWidthTarget?: HTMLDivElement | null;
+  // 측정한 폭에 곱할 비율. 차트 전체화면에서는 차트 패널이 화면 전체 폭이 되는데,
+  // 종목 바까지 쫙 늘리지 않고 평소(호가/주문 패널이 있을 때)처럼 절반만 쓰도록 0.5를 넘긴다.
+  contentWidthScale?: number;
   // UTC 0시~0시5분 휴장 시간대 여부. true면 종목 바 옆 빈 공간에 배지를 띄운다.
   isMarketClosed?: boolean;
 }
@@ -63,6 +66,7 @@ export function StockHeader({
   selectedStockId,
   onSelectStock,
   contentWidthTarget,
+  contentWidthScale = 1,
   isMarketClosed,
 }: StockHeaderProps) {
   const isDesktop = useIsDesktop();
@@ -128,12 +132,14 @@ export function StockHeader({
     if (!contentWidthTarget) return;
 
     const update = () =>
-      setContentWidth(contentWidthTarget.getBoundingClientRect().width);
+      setContentWidth(
+        contentWidthTarget.getBoundingClientRect().width * contentWidthScale,
+      );
     update();
     const observer = new ResizeObserver(update);
     observer.observe(contentWidthTarget);
     return () => observer.disconnect();
-  }, [contentWidthTarget]);
+  }, [contentWidthTarget, contentWidthScale]);
 
   const price = stockInfo ? parseFloat(stockInfo.price) : 0;
   const prevClose = stockInfo ? parseFloat(stockInfo.prevClose) : 0;
@@ -246,7 +252,7 @@ export function StockHeader({
 
         {/* 드롭다운 */}
         <div
-          className={`absolute top-full left-0 right-0 mt-1.5 z-50 grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
+          className={`absolute top-full left-0 right-0 mt-1.5 z-60 grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
             open
               ? "grid-rows-[1fr] opacity-100"
               : "grid-rows-[0fr] opacity-0 pointer-events-none"
